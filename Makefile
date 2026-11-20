@@ -5,7 +5,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOFLAGS := -trimpath -ldflags "-s -w"
 CAPTURE := testdata/capture/global-2026-11-21.jsonl.gz
 
-.PHONY: build local vendor test e2e dev-fake dev seed clean
+.PHONY: build local vendor test e2e demo dev-fake dev seed clean
 
 build: vendor
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -o bin/airspace-linux-amd64 ./cmd/airspace
@@ -27,6 +27,13 @@ test:
 e2e: local
 	go build -o bin/devtool ./cmd/devtool
 	cd e2e && npx playwright test --trace off
+
+# Render the README clip from the captured data. Needs ffmpeg, and internet
+# for NASA imagery. Makes no OpenSky request.
+demo: local
+	go build -o bin/devtool ./cmd/devtool
+	cd e2e && node demo.mjs .tmp/demo.mp4
+	ffmpeg -v error -y -i e2e/.tmp/demo.mp4 -c:v libvpx-vp9 -b:v 0 -crf 46 -row-mt 1 -an docs/demo.webm
 
 # Run a fake OpenSky that replays the captured global traffic.
 dev-fake:

@@ -355,6 +355,22 @@ func badCamera(c Camera) bool {
 	return c.Height <= 0 || c.Lat < -90 || c.Lat > 90
 }
 
+// SetSharedView records what the shared camera sees, as reported by an
+// attached client that has just applied it. seq must be the camera's current
+// sequence number, so a late report for an old camera is ignored. The camera
+// itself does not change.
+func (h *Hub) SetSharedView(id string, seq int64, view scope.View) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c := h.clients[id]
+	if c == nil || c.detached || c.replay || seq != h.camera.Seq {
+		return
+	}
+	h.view = &view
+	h.cameraDirty = true
+	h.changed(time.Now())
+}
+
 // SetView records what a detached client sees. It affects query scope only.
 func (h *Hub) SetView(id string, view scope.View) {
 	h.mu.Lock()

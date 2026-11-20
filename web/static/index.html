@@ -1,1 +1,133 @@
-<!doctype html><title>Airspace</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airspace</title>
+<link rel="stylesheet" href="vendor/cesium/Widgets/widgets.css">
+<link rel="stylesheet" href="css/app.css">
+<script>window.CESIUM_BASE_URL = 'vendor/cesium/';</script>
+<script src="vendor/cesium/Cesium.js"></script>
+<script type="module" src="js/main.js"></script>
+<script type="module" src="vendor/datastar.js"></script>
+</head>
+<body
+  data-signals__ifmissing="{
+    clientId: '', serverTime: 0,
+    interval: {seconds: 10, requested: 10, reason: ''},
+    bounds: {min: 5, max: 0},
+    selected: '', recording: 'on', coverage: 'viewport',
+    scope: {global: false, cost: 1},
+    snapshot: {version: 0, time: 0, fetched: 0, count: 0, scope: {global: false, cost: 0}},
+    credits: {known: false, remaining: 0, cost: 1, interval: 10, burn: 0, secondsLeft: -1, exhaustAt: 0, refillKnown: false,
+              global: {cost: 4, interval: 10, burn: 0, secondsLeft: -1}},
+    status: {state: 'stopped', error: '', errorAt: 0, limitedUntil: 0, active: 0, connected: 0, storage: '', session: 0},
+    _now: Date.now(), _detached: false, _confirmGlobal: false, _exag: 1, _panel: true
+  }"
+  data-init="@get('/api/stream', {openWhenHidden: true, retry: 'always', retryMaxCount: 1000000, retryMaxWait: 5000, filterSignals: {include: /^clientId$/}})"
+  data-on-signal-patch="window.airspace && window.airspace.onPatch(patch)"
+  data-on-interval__duration.1s="$_now = Date.now()">
+
+<div id="stage"><div id="globe"></div></div>
+
+<header id="top">
+  <h1>Airspace</h1>
+  <span id="mode-chip" class="chip"
+    data-class="{warn: $status.state == 'paused', off: $status.state == 'stopped', bad: fmt.stale($snapshot.fetched, $interval.seconds, $_now, $status.state)}"
+    data-text="fmt.stateLabel($status.state, $snapshot.fetched, $interval.seconds, $_now)">Connecting</span>
+  <span class="chip rec" data-show="$recording == 'on' && $status.state != 'stopped'" title="This session is being recorded">REC</span>
+  <span class="chip global" data-show="$coverage == 'global'" style="display:none" title="Every poll queries the whole world">GLOBAL COVERAGE</span>
+  <span class="chip replay-chip">REPLAY</span>
+  <span class="spacer"></span>
+  <button id="btn-sessions" class="btn">Sessions</button>
+  <button class="btn" data-on:click="$_panel = !$_panel" data-text="$_panel ? 'Hide panel' : 'Show panel'">Hide panel</button>
+</header>
+
+<aside id="status" class="panel" data-show="$_panel">
+  <section class="live-only">
+    <div class="row"><span>Aircraft</span><b id="ro-count" data-text="fmt.int($snapshot.count)">0</b></div>
+    <div class="row"><span>Snapshot age</span><b id="ro-age" data-class="{bad: fmt.stale($snapshot.fetched, $interval.seconds, $_now, $status.state)}"
+      data-text="fmt.age($snapshot.fetched, $_now)">–</b></div>
+    <div class="row"><span>Query scope</span><b id="ro-scope" data-text="fmt.scope($scope.global, $scope.cost, window.airspace && airspace.scopeArea(), $_now)">–</b></div>
+    <div class="row"><span>Clients</span><b id="ro-clients" data-text="$status.active + ' active of ' + $status.connected">–</b></div>
+  </section>
+
+  <section class="live-only">
+    <div class="row"><span>Cost per poll</span><b id="ro-cost" data-text="$credits.cost + ($credits.cost == 1 ? ' credit' : ' credits')">–</b></div>
+    <div class="row">
+      <label for="interval">Refresh every</label>
+      <span class="interval">
+        <input id="interval" type="number" step="1" inputmode="numeric"
+          data-attr:min="$bounds.min" data-attr:max="$bounds.max > 0 ? $bounds.max : 3600"
+          data-effect="if (document.activeElement !== el) el.value = fmt.num($interval.seconds)"
+          data-on:change="act('interval', {seconds: Number(el.value)}); el.blur()"
+          data-on:keydown="evt.key == 'Enter' && el.blur()"> s
+      </span>
+    </div>
+    <div class="row sub"><span id="ro-bounds" data-text="fmt.bounds($bounds.min, $bounds.max)">–</span>
+      <b id="ro-reason" class="warn-text" data-show="$interval.reason != ''" data-text="$interval.reason"></b></div>
+  </section>
+
+  <section class="live-only" data-class="{warning: $credits.known && $credits.secondsLeft >= 0 && $credits.secondsLeft < 1800}">
+    <div class="row"><span>Credits left</span><b id="ro-credits" data-text="$credits.known ? fmt.int($credits.remaining) : 'unknown until first poll'">–</b></div>
+    <div class="row"><span>Burn rate</span><b id="ro-burn" data-text="fmt.int($credits.burn) + ' / hour'">–</b></div>
+    <div class="row"><span>Viewing time left</span><b id="ro-left" data-text="fmt.dur($credits.secondsLeft)">–</b></div>
+    <div class="row"><span>Runs out at</span><b id="ro-exhaust" data-text="fmt.clock($credits.exhaustAt)">–</b></div>
+    <div class="row sub"><span data-text="$credits.refillKnown ? '' : 'OpenSky does not publish the daily refill time, so it is not known whether credits run out before it.'"></span></div>
+    <div class="row sub warn-text" id="ro-low" data-show="$credits.known && $credits.secondsLeft >= 0 && $credits.secondsLeft < 1800" style="display:none">
+      <span>Under 30 minutes of viewing time left at this rate.</span></div>
+  </section>
+
+  <section class="live-only">
+    <div class="row"><span>Recording</span>
+      <span class="seg">
+        <button id="rec-on" data-class="{on: $recording == 'on'}" data-on:click="act('recording', {value: 'on'})">On</button>
+        <button id="rec-off" data-class="{on: $recording == 'off'}" data-on:click="act('recording', {value: 'off'})">Off</button>
+      </span></div>
+    <div class="row"><span>Coverage</span>
+      <span class="seg">
+        <button id="cov-viewport" data-class="{on: $coverage == 'viewport'}" data-on:click="act('coverage', {value: 'viewport'})">Viewport</button>
+        <button id="cov-global" data-class="{on: $coverage == 'global', hot: $coverage == 'global'}" data-on:click="$coverage == 'global' || ($_confirmGlobal = true)">Global</button>
+      </span></div>
+    <div id="confirm-global" class="confirm" data-show="$_confirmGlobal" style="display:none">
+      <p>Global coverage queries the whole world on every poll, whatever the view. It costs
+        <b>4 credits</b> a poll at a <b data-text="fmt.num($credits.global.interval) + ' s'"></b> interval:
+        <b data-text="fmt.int($credits.global.burn) + ' credits an hour'"></b>, so the balance lasts
+        <b data-text="fmt.dur($credits.global.secondsLeft)"></b>. It turns itself off when the session ends.</p>
+      <button id="confirm-global-yes" class="btn hot" data-on:click="act('coverage', {value: 'global'}); $_confirmGlobal = false">Switch to global</button>
+      <button class="btn" data-on:click="$_confirmGlobal = false">Cancel</button>
+    </div>
+    <div class="row"><span title="Stop following the shared camera, and stop moving it for others">Shared camera</span>
+      <span class="seg">
+        <button id="attach" data-class="{on: !$_detached}" data-on:click="$_detached = false">Attached</button>
+        <button id="detach" data-class="{on: $_detached}" data-on:click="$_detached = true">Detached</button>
+      </span></div>
+  </section>
+
+  <section>
+    <div class="row"><label for="exag">Altitude exaggeration</label>
+      <span><input id="exag" type="range" min="1" max="50" step="1" data-bind="_exag"> <b data-text="$_exag + '×'">1×</b></span></div>
+  </section>
+
+  <section class="notes" data-show="$status.storage != '' || $status.error != ''" style="display:none">
+    <div id="ro-storage" class="warn-text" data-show="$status.storage != ''" data-text="'Not recording: ' + $status.storage"></div>
+    <div id="ro-error" class="warn-text live-only" data-show="$status.error != ''" data-text="'Upstream: ' + $status.error + ' (showing the last good data)'"></div>
+  </section>
+</aside>
+
+<aside id="aircraft" class="panel" hidden></aside>
+<aside id="sessions" class="panel" hidden></aside>
+
+<div id="paused" class="overlay" data-show="$status.state == 'paused'" style="display:none" data-on:click="act('input', {})">
+  <div><strong>Paused</strong><span>Nobody has touched Airspace for a while, so it stopped asking for data. Click to resume.</span></div>
+</div>
+
+<div id="replay-bar" class="panel" hidden></div>
+<dialog id="export-dialog"></dialog>
+
+<footer id="credits">
+  <span>Aircraft data: <a href="https://opensky-network.org" target="_blank" rel="noopener">The OpenSky Network</a></span>
+  <span>Imagery: NASA Global Imagery Browse Services (GIBS), Blue Marble</span>
+</footer>
+</body>
+</html>

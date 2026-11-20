@@ -140,7 +140,7 @@ func TestEventsOrderedAndPaged(t *testing.T) {
 	var all []Event
 	after := int64(0)
 	for {
-		ev, more, err := s.Events(ctx, 1, 0, 1<<62, after, 5)
+		ev, more, err := s.Events(ctx, 1, 0, 1<<62, after, 5, nil, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,6 +160,21 @@ func TestEventsOrderedAndPaged(t *testing.T) {
 		if i > 0 && (e.Time < all[i-1].Time || e.ID <= all[i-1].ID) {
 			t.Errorf("event %d not in time order", i)
 		}
+	}
+}
+
+func TestEventTypeFilter(t *testing.T) {
+	s, _ := open(t, Options{})
+	start := time.UnixMilli(1_700_000_000_000)
+	s.SessionStart(1, start)
+	for i, typ := range []string{"camera", "interval", "camera", "selected", "camera"} {
+		s.Event(1, start.Add(time.Duration(i)*time.Second), typ, nil)
+	}
+	s.Flush()
+	only, _, _ := s.Events(ctx, 1, 0, 1<<62, 0, 10, []string{"camera"}, false)
+	rest, _, _ := s.Events(ctx, 1, 0, 1<<62, 0, 10, []string{"camera"}, true)
+	if len(only) != 3 || len(rest) != 2 || rest[0].Type != "interval" || rest[1].Type != "selected" {
+		t.Errorf("filter: %d camera events, others %+v", len(only), rest)
 	}
 }
 

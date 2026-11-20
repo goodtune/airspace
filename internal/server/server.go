@@ -35,7 +35,7 @@ type Sessions interface {
 	Rename(ctx context.Context, id int64, name string) error
 	Delete(ctx context.Context, id int64) error
 	Snapshots(ctx context.Context, id, from, to int64, limit int, fn func(store.SnapshotRow) error) (bool, error)
-	Events(ctx context.Context, id, from, to, after int64, limit int) ([]store.Event, bool, error)
+	Events(ctx context.Context, id, from, to, after int64, limit int, types []string, exclude bool) ([]store.Event, bool, error)
 	Size() (int64, error)
 }
 
@@ -118,8 +118,9 @@ func (s *Server) states(w http.ResponseWriter, r *http.Request) {
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		hub.State
-		DBBytes int64 `json:"dbBytes"`
-	}{State: s.Hub.State()}
+		ServerTime int64 `json:"serverTime"`
+		DBBytes    int64 `json:"dbBytes"`
+	}{State: s.Hub.State(), ServerTime: time.Now().UnixMilli()}
 	if s.Sessions != nil {
 		out.DBBytes, _ = s.Sessions.Size()
 	}
@@ -151,9 +152,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		case <-heartbeat.C:
 		}
 		payload := struct {
-			ClientID string `json:"clientId"`
+			ClientID   string `json:"clientId"`
+			ServerTime int64  `json:"serverTime"` // unix ms, for clock offset
 			hub.State
-		}{id, s.Hub.State()}
+		}{id, time.Now().UnixMilli(), s.Hub.State()}
 		if err := sse.MarshalAndPatchSignals(payload); err != nil {
 			return
 		}
@@ -176,6 +178,7 @@ type actionBody struct {
 	Visible  bool        `json:"visible"`
 	Replay   bool        `json:"replay"`
 	Detached bool        `json:"detached"`
+	Seq      *int64      `json:"seq"`
 }
 
 // action applies a change to shared state from one client.
@@ -204,7 +207,12 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "view is required")
 			return
 		}
-		s.Hub.SetView(b.ClientID, *b.View)
+		if b.Seq != nil {
+			// An attached client saying what the shared camera shows.
+			s.Hub.SetSharedView(b.ClientID, *b.Seq, *b.View)
+		} else {
+			s.Hub.SetView(b.ClientID, *b.View)
+		}
 	case "select":
 		s.Hub.Select(b.ClientID, b.ICAO24)
 	case "recording":
@@ -416,7 +424,15 @@ func (s *Server) sessionEvents(w http.ResponseWriter, r *http.Request) {
 		storeFail(w, err)
 		return
 	}
-	events, more, err := s.Sessions.Events(r.Context(), id, from, to, after, limit)
+	// types=a,b keeps only those event types; exclude=a,b drops them.
+	var types []string
+	exclude := false
+	if v := r.URL.Query().Get("types"); v != "" {
+		types = strings.Split(v, ",")
+	} else if v := r.URL.Query().Get("exclude"); v != "" {
+		types, exclude = strings.Split(v, ","), true
+	}
+	events, more, err := s.Sessions.Events(r.Context(), id, from, to, after, limit, types, exclude)
 	if err != nil {
 		storeFail(w, err)
 		return

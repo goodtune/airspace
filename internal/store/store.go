@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -411,9 +412,9 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	return s, nil
 }
 
-// Sessions lists sessions, newest first.
+// Sessions lists sessions that hold at least one snapshot, newest first.
 func (s *Store) Sessions(ctx context.Context) ([]Session, error) {
-	rows, err := s.r.QueryContext(ctx, `SELECT `+sessionCols+` FROM sessions ORDER BY start DESC`)
+	rows, err := s.r.QueryContext(ctx, `SELECT `+sessionCols+` FROM sessions WHERE snapshots > 0 ORDER BY start DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -519,10 +520,22 @@ func (s *Store) Snapshots(ctx context.Context, id, from, to int64, limit int, fn
 }
 
 // Events returns events with from <= time <= to and id > after, oldest
-// first, up to limit. It reports whether more remain.
-func (s *Store) Events(ctx context.Context, id, from, to, after int64, limit int) (events []Event, more bool, err error) {
-	rows, err := s.r.QueryContext(ctx, `SELECT id, time, type, payload FROM events
-		WHERE session_id = ? AND time >= ? AND time <= ? AND id > ? ORDER BY time, id LIMIT ?`, id, from, to, after, limit+1)
+// first, up to limit. types narrows the result to those event types, or to
+// every other type when exclude is set. It reports whether more remain.
+func (s *Store) Events(ctx context.Context, id, from, to, after int64, limit int, types []string, exclude bool) (events []Event, more bool, err error) {
+	q := `SELECT id, time, type, payload FROM events WHERE session_id = ? AND time >= ? AND time <= ? AND id > ?`
+	args := []any{id, from, to, after}
+	if len(types) > 0 {
+		q += ` AND type`
+		if exclude {
+			q += ` NOT`
+		}
+		q += ` IN (?` + strings.Repeat(`, ?`, len(types)-1) + `)`
+		for _, t := range types {
+			args = append(args, t)
+		}
+	}
+	rows, err := s.r.QueryContext(ctx, q+` ORDER BY time, id LIMIT ?`, append(args, limit+1)...)
 	if err != nil {
 		return nil, false, err
 	}

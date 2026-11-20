@@ -1,0 +1,39 @@
+# Example systemd unit for Airspace.
+#
+#   sudo install -m 0755 bin/airspace-linux-amd64 /usr/local/bin/airspace
+#   sudo useradd --system --home /var/lib/airspace --shell /usr/sbin/nologin airspace
+#   sudo install -m 0600 -o root -g root /dev/null /etc/airspace.env
+#   sudoedit /etc/airspace.env        # OPENSKY_CLIENT_ID=... and OPENSKY_CLIENT_SECRET=...
+#   sudo cp deploy/airspace.service /etc/systemd/system/
+#   sudo systemctl enable --now airspace
+
+[Unit]
+Description=Airspace: live aircraft on a shared 3D globe
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=airspace
+Group=airspace
+# The secret lives here, readable by root only. systemd reads it before
+# dropping privileges.
+EnvironmentFile=/etc/airspace.env
+Environment=LISTEN_ADDR=:8080
+Environment=DB_PATH=/var/lib/airspace/airspace.db
+StateDirectory=airspace
+ExecStart=/usr/local/bin/airspace
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadWritePaths=/var/lib/airspace
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,7 @@ import (
 	"github.com/goodtune/airspace/internal/opensky"
 	"github.com/goodtune/airspace/internal/server"
 	"github.com/goodtune/airspace/internal/store"
+	"github.com/goodtune/airspace/internal/telemetry"
 )
 
 // App is a running instance.
@@ -25,6 +26,8 @@ type App struct {
 	Handler http.Handler
 	cfg     *config.Config
 	log     *slog.Logger
+	up      *opensky.Client
+	srv     *server.Server
 }
 
 // New builds the app. It makes no request to OpenSky.
@@ -44,6 +47,7 @@ func New(cfg *config.Config, static fs.FS, log *slog.Logger) *App {
 		HTTP:     &http.Client{Timeout: 45 * time.Second},
 		TokenURL: cfg.TokenURL, APIURL: cfg.APIURL, ID: cfg.ClientID, Secret: cfg.ClientSecret,
 	}
+	a.up = up
 	a.Hub = hub.New(cfg, up, rec, log)
 	if a.Store != nil {
 		var saved hub.SavedCamera
@@ -51,8 +55,54 @@ func New(cfg *config.Config, static fs.FS, log *slog.Logger) *App {
 			a.Hub.Restore(saved)
 		}
 	}
-	a.Handler = (&server.Server{Hub: a.Hub, Sessions: sessions, Static: static, Log: log}).Handler()
+	a.srv = &server.Server{Hub: a.Hub, Sessions: sessions, Static: static, Log: log}
+	a.Handler = a.srv.Handler()
 	return a
+}
+
+// Instrument connects the app to metrics. Call it before Run or Serve. A nil
+// m leaves the app as it is.
+func (a *App) Instrument(m *telemetry.Metrics) error {
+	if m == nil {
+		return nil
+	}
+	ctx := context.Background()
+	a.up.Observe = func(endpoint string, status int, err error, d time.Duration, remaining int, has bool, cost int) {
+		m.UpstreamRequest(ctx, endpoint, status, err, d, remaining, has, cost)
+	}
+	a.Hub.OnPoll = func(outcome string, global bool, aircraft int) { m.Poll(ctx, outcome, global, aircraft) }
+	a.Hub.OnChange = func(kind string) { m.StateChange(ctx, kind) }
+	a.srv.Observe = func(route, method string, status int, d time.Duration, stream bool) {
+		m.HTTPRequest(ctx, route, method, status, d, stream)
+	}
+	if a.Store != nil {
+		a.Store.Observe = func(event string, n int) {
+			switch event {
+			case "snapshot":
+				m.SnapshotStored(ctx, n)
+			case "pruned":
+				m.SessionsPruned(ctx, n)
+			default:
+				m.StorageFailure(ctx, event)
+			}
+		}
+	}
+	return m.Observe(func() telemetry.Gauges {
+		s := a.Hub.State()
+		g := telemetry.Gauges{
+			ClientsConnected: s.Status.Connected, ClientsActive: s.Status.Active, State: s.Status.State,
+			IntervalSeconds: s.Interval.Seconds, PollCost: s.Credits.Cost,
+			Recording: s.Status.Session != 0 && s.Recording == "on", StorageHealthy: s.Status.Storage == "",
+		}
+		if s.Snapshot.Fetched != 0 {
+			g.SnapshotAgeKnown = true
+			g.SnapshotAge = time.Since(time.UnixMilli(s.Snapshot.Fetched)).Seconds()
+		}
+		if a.Store != nil {
+			g.DBBytes, _ = a.Store.Size()
+		}
+		return g
+	})
 }
 
 // Run serves until ctx is done.

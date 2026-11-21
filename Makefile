@@ -2,10 +2,10 @@
 # frontend embedded.
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-GOFLAGS := -trimpath -ldflags "-s -w"
+GOFLAGS := -trimpath -ldflags "-s -w -X main.version=$(VERSION)"
 CAPTURE := testdata/capture/global-2026-11-21.jsonl.gz
 
-.PHONY: build local vendor test acme-test e2e demo dev-fake dev seed clean
+.PHONY: build local vendor test acme-test e2e demo snapshot dev-fake dev seed clean
 
 build: vendor
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -o bin/airspace-linux-amd64 ./cmd/airspace
@@ -14,6 +14,12 @@ build: vendor
 # A binary for the machine you are on.
 local: vendor
 	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/airspace ./cmd/airspace
+
+# Build every release artefact locally (archives, packages) without
+# publishing anything. Releases themselves are made by GoReleaser in CI when a
+# GitHub release is published.
+snapshot:
+	goreleaser release --snapshot --clean --skip=docker
 
 # Fetch the pinned frontend libraries that get embedded.
 vendor:

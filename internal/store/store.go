@@ -102,6 +102,11 @@ type Store struct {
 	queue chan func(*sql.DB) error
 	done  chan struct{}
 
+	// Observe, when set, feeds metrics: "snapshot" with its size in bytes,
+	// "error" for a failed write, "dropped" for a write lost to a full
+	// queue, and "pruned" with the number of sessions deleted.
+	Observe func(event string, n int)
+
 	mu      sync.Mutex
 	health  string
 	current int64
@@ -190,6 +195,9 @@ func (s *Store) writer() {
 	defer close(s.done)
 	for op := range s.queue {
 		err := op(s.w)
+		if err != nil {
+			s.observe("error", 1)
+		}
 		s.mu.Lock()
 		if err != nil {
 			if s.health == "" {
@@ -211,9 +219,16 @@ func (s *Store) enqueue(op func(*sql.DB) error) {
 	select {
 	case s.queue <- op:
 	default:
+		s.observe("dropped", 1)
 		s.mu.Lock()
 		s.health = queueFull
 		s.mu.Unlock()
+	}
+}
+
+func (s *Store) observe(event string, n int) {
+	if s.Observe != nil {
+		s.Observe(event, n)
 	}
 }
 
@@ -281,6 +296,7 @@ func (s *Store) Snapshot(session int64, snap *model.Snapshot) {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		s.observe("snapshot", len(blob))
 		s.writes++
 		if s.writes%200 == 0 {
 			return s.prune(db)
@@ -377,6 +393,7 @@ func (s *Store) prune(db *sql.DB) error {
 		deleted++
 	}
 	if deleted > 0 {
+		s.observe("pruned", deleted)
 		s.log.Info("pruned sessions", "count", deleted)
 		return reclaim(db)
 	}

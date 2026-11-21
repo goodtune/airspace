@@ -47,6 +47,9 @@ type Server struct {
 	Log      *slog.Logger
 	// Heartbeat is how often an idle stream resends state. Zero means 15 s.
 	Heartbeat time.Duration
+	// Observe, when set, is told about every request served. route is the
+	// matched pattern, so path parameters do not multiply the label.
+	Observe func(route, method string, status int, d time.Duration, stream bool)
 
 	started string
 }
@@ -68,8 +71,48 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/events", s.sessionEvents)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such endpoint") })
 	mux.HandleFunc("/", s.static)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Observe == nil {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		mux.ServeHTTP(rec, r)
+		// The mux records the pattern it matched on the request.
+		route := r.Pattern
+		if i := strings.IndexByte(route, ' '); i >= 0 {
+			route = route[i+1:]
+		}
+		switch route {
+		case "/":
+			route = "static"
+		case "":
+			route = "unmatched"
+		}
+		s.Observe(route, r.Method, rec.status, time.Since(start), route == "/api/stream")
+	})
 }
+
+// statusRecorder notes the response status. It passes Flush through and
+// unwraps, so streaming responses work as before.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

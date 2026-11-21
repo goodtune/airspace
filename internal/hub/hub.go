@@ -136,6 +136,11 @@ type Hub struct {
 
 	wake chan struct{}
 
+	// OnPoll and OnChange, when set, feed metrics. Set them before Run.
+	// OnPoll gets ok, error, or rate_limited. OnChange gets an event type.
+	OnPoll   func(outcome string, global bool, aircraft int)
+	OnChange func(kind string)
+
 	mu        sync.Mutex
 	clients   map[string]*client
 	subs      map[chan struct{}]struct{}
@@ -437,6 +442,9 @@ func onOff(b bool) string {
 
 // event records a shared-state change in the current session.
 func (h *Hub) event(now time.Time, typ string, payload any) {
+	if h.OnChange != nil {
+		h.OnChange(typ)
+	}
 	if h.session != 0 && h.recording {
 		h.rec.Event(h.session, now, typ, payload)
 	}
@@ -845,7 +853,14 @@ func (h *Hub) poll(ctx context.Context) {
 		h.failures++
 		h.lastErr, h.lastErrAt = err.Error(), now
 		var rl *opensky.RateLimitError
+		outcome := "error"
 		if errors.As(err, &rl) {
+			outcome = "rate_limited"
+		}
+		if h.OnPoll != nil {
+			h.OnPoll(outcome, plan.Global, 0)
+		}
+		if rl != nil {
 			h.retryUntil, h.limited = now.Add(rl.RetryAfter), true
 			h.remaining, h.hasRemaining = 0, true
 			h.failures = 0 // retry-after governs, not backoff
@@ -874,6 +889,9 @@ func (h *Hub) poll(ctx context.Context) {
 	h.snapGzip = buf.Bytes()
 	if h.session != 0 && h.recording {
 		h.rec.Snapshot(h.session, snap)
+	}
+	if h.OnPoll != nil {
+		h.OnPoll("ok", plan.Global, len(snap.Aircraft))
 	}
 	h.log.Info("upstream poll", "version", h.version, "aircraft", len(snap.Aircraft), "cost", plan.Cost,
 		"requests", len(boxes), "remaining", strconv.Itoa(h.remaining))

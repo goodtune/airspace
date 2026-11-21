@@ -44,6 +44,12 @@ type rig struct {
 
 func start(t *testing.T, mod func(*config.Config)) *rig {
 	t.Helper()
+	return startWith(t, mod, nil)
+}
+
+// startWith is start, with a hook that runs on the app before it serves.
+func startWith(t *testing.T, mod func(*config.Config), before func(*App)) *rig {
+	t.Helper()
 	fake := fakeopensky.New()
 	up := httptest.NewServer(fake.Handler())
 	t.Cleanup(up.Close)
@@ -66,6 +72,9 @@ func start(t *testing.T, mod func(*config.Config)) *rig {
 		"vendor/data.wasm": {Data: []byte{0, 97, 115, 109}},
 	}
 	a := New(cfg, static, slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	if before != nil {
+		before(a)
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

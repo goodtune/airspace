@@ -31,6 +31,11 @@ type Client struct {
 	ID       string
 	Secret   string
 
+	// Observe, when set, is told about every request made to OpenSky, token
+	// requests included. status is 0 and err is set when there was no
+	// response. cost is the credit cost of a state query, 0 for a token.
+	Observe func(endpoint string, status int, err error, d time.Duration, remaining int, hasRemaining bool, cost int)
+
 	mu     sync.Mutex
 	token  string
 	expiry time.Time
@@ -63,25 +68,25 @@ func (c *Client) States(ctx context.Context, box *scope.Box) (*Result, error) {
 		q.Set("lomax", ff(box.LoMax))
 		u += "?" + q.Encode()
 	}
-	resp, err := c.get(ctx, u, false)
+	cost := scope.MaxCost
+	if box != nil {
+		cost = scope.Cost(box.Area())
+	}
+	resp, err := c.get(ctx, u, false, cost)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		// The token expired early. Refresh once and retry.
 		drain(resp)
-		if resp, err = c.get(ctx, u, true); err != nil {
+		if resp, err = c.get(ctx, u, true, cost); err != nil {
 			return nil, err
 		}
 	}
 	defer drain(resp)
 
 	res := &Result{}
-	if v := resp.Header.Get("X-Rate-Limit-Remaining"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			res.Remaining, res.HasRemaining = n, true
-		}
-	}
+	res.Remaining, res.HasRemaining = remaining(resp)
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
 		secs, _ := strconv.Atoi(resp.Header.Get("X-Rate-Limit-Retry-After-Seconds"))
@@ -102,7 +107,17 @@ func (c *Client) States(ctx context.Context, box *scope.Box) (*Result, error) {
 	return res, nil
 }
 
-func (c *Client) get(ctx context.Context, u string, forceToken bool) (*http.Response, error) {
+// remaining reads the credit balance from a response.
+func remaining(resp *http.Response) (int, bool) {
+	if v := resp.Header.Get("X-Rate-Limit-Remaining"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+func (c *Client) get(ctx context.Context, u string, forceToken bool, cost int) (*http.Response, error) {
 	tok, err := c.accessToken(ctx, forceToken)
 	if err != nil {
 		return nil, err
@@ -112,10 +127,14 @@ func (c *Client) get(ctx context.Context, u string, forceToken bool) (*http.Resp
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
+	start := time.Now()
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		c.observe("states", 0, err, start, 0, false, cost)
 		return nil, fmt.Errorf("OpenSky request failed: %w", err)
 	}
+	left, has := remaining(resp)
+	c.observe("states", resp.StatusCode, nil, start, left, has, cost)
 	return resp, nil
 }
 
@@ -132,10 +151,13 @@ func (c *Client) accessToken(ctx context.Context, force bool) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	start := time.Now()
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		c.observe("token", 0, err, start, 0, false, 0)
 		return "", fmt.Errorf("OpenSky token request failed: %w", err)
 	}
+	c.observe("token", resp.StatusCode, nil, start, 0, false, 0)
 	defer drain(resp)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("OpenSky token endpoint returned HTTP %d; check the client id and secret", resp.StatusCode)
@@ -157,6 +179,12 @@ func (c *Client) accessToken(ctx context.Context, force bool) (string, error) {
 	}
 	c.token, c.expiry = t.AccessToken, time.Now().Add(life-margin)
 	return c.token, nil
+}
+
+func (c *Client) observe(endpoint string, status int, err error, start time.Time, remaining int, has bool, cost int) {
+	if c.Observe != nil {
+		c.Observe(endpoint, status, err, time.Since(start), remaining, has, cost)
+	}
 }
 
 func ff(f float64) string { return strconv.FormatFloat(f, 'f', 4, 64) }

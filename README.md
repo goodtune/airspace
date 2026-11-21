@@ -28,8 +28,11 @@ NASA Blue Marble from [GIBS](https://www.earthdata.nasa.gov/engage/open-data-ser
 
 4. Open `http://<host>:8080`.
 
-`deploy/airspace.service` is an example systemd unit. `Dockerfile` builds a
-minimal image.
+Each [release](https://github.com/goodtune/airspace/releases) has archives
+for Linux, macOS and Windows, `rpm`, `deb` and `apk` packages, and a container
+image at `ghcr.io/goodtune/airspace`. The packages install a systemd unit
+(disabled until you enable it) and `/etc/airspace/airspace.env` for the
+settings. `Dockerfile` builds an image from source.
 
 ## Create an OpenSky API client
 
@@ -40,6 +43,28 @@ minimal image.
 
 The secret stays on the server. Airspace never sends it, or the access token,
 to a browser, and never writes either to the log.
+
+### Credentials from dotvault
+
+If you keep secrets in [dotvault](https://github.com/goodtune/dotvault),
+Airspace can read the two values from there. Store a secret with the fields
+`clientId` and `clientSecret`, then name it:
+
+```sh
+./bin/airspace --dotvault opensky      # or OPENSKY_DOTVAULT=opensky
+```
+
+- Do not also set `OPENSKY_CLIENT_ID` or `OPENSKY_CLIENT_SECRET`; Airspace
+  refuses to start with both, so there is no doubt which is in use.
+- Airspace uses the login dotvault already has for the user it runs as. It
+  never opens a browser or prompts. If there is no usable login, it says so
+  and stops: run `dotvault login` first.
+- It reads dotvault's system configuration file, or
+  `~/.config/dotvault/config.yaml` when there is no system file. Set
+  `DOTVAULT_CONFIG` (or `--dotvault-config`) for any other location.
+- The credentials are read once, at startup. Restart Airspace after you
+  change them. This talks to Vault, not to OpenSky, so it does not break the
+  rule that startup makes no OpenSky request.
 
 ## How it uses OpenSky
 
@@ -64,6 +89,7 @@ Run `airspace -h` for the list. Nothing here can be changed from the UI.
 |---|---|---|
 | `OPENSKY_CLIENT_ID` | required | OAuth2 client id |
 | `OPENSKY_CLIENT_SECRET` | required | OAuth2 client secret |
+| `OPENSKY_DOTVAULT` | unset | Read the id and secret from this dotvault secret instead. Flag: `--dotvault`. |
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `POLL_INTERVAL` | `10s` | The shared refresh interval at startup |
 | `MIN_INTERVAL` | `auto` | Shortest interval a browser may set: `auto`, or a duration of 5 s or more |
@@ -130,8 +156,47 @@ port 80**, at the address the hostname resolves to.
   ```
 
 Wildcard names are not supported. On Linux, a service that is not root needs
-`CAP_NET_BIND_SERVICE` to open ports 80 and 443; the example systemd unit
-shows the lines.
+`CAP_NET_BIND_SERVICE` to open ports 80 and 443; the systemd unit in
+`packaging/systemd/` shows the lines.
+
+### Metrics
+
+Airspace emits OpenTelemetry metrics over OTLP. Export is off until you
+point it at a collector with the standard variables:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.example.org:4318 ./bin/airspace
+```
+
+It honours the usual `OTEL_*` settings: `OTEL_EXPORTER_OTLP_PROTOCOL`
+(`http/protobuf` by default, or `grpc`), `OTEL_EXPORTER_OTLP_HEADERS`,
+`OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_SERVICE_NAME` (default `airspace`),
+`OTEL_RESOURCE_ATTRIBUTES`, and `OTEL_SDK_DISABLED`. Sending metrics is not
+an OpenSky request and does not depend on anyone watching.
+
+| Metric | Type | Attributes | Meaning |
+|---|---|---|---|
+| `airspace.build_info` | gauge | `version`, `revision`, `goversion` | Always 1. Identifies the running build. |
+| `airspace.opensky.requests` | counter | `endpoint` (`states`, `token`), `outcome` (`ok`, `rate_limited`, `unauthorized`, `error`), `http.response.status_code` | Every request made to OpenSky, token requests included |
+| `airspace.opensky.credits.remaining` | gauge | | The balance from `X-Rate-Limit-Remaining`, recorded with the request that returned it |
+| `airspace.opensky.credits.spent` | counter | | Credits spent, from the area of each successful query |
+| `airspace.opensky.request.duration` | histogram | `endpoint` | Time taken by each OpenSky request |
+| `airspace.polls` | counter | `outcome`, `coverage` (`viewport`, `global`) | Poll cycles. One poll can make several requests. |
+| `airspace.snapshot.aircraft` | gauge | | Aircraft in the latest snapshot |
+| `airspace.snapshot.age` | gauge | | Seconds since the last good snapshot |
+| `airspace.poll.interval` | gauge | | Effective poll interval, seconds |
+| `airspace.poll.cost` | gauge | | Credit cost of one poll at the current scope |
+| `airspace.poller.state` | gauge | `state` (`polling`, `paused`, `stopped`) | 1 for the current state, 0 for the others |
+| `airspace.clients.connected` | gauge | | Browsers holding the event stream |
+| `airspace.clients.active` | gauge | | Browsers counted as watching live |
+| `airspace.state.changes` | counter | `type` | Changes to shared state: camera, interval, selected, coverage, scope, and so on |
+| `airspace.http.server.requests` | counter | `http.route`, `http.request.method`, `http.response.status_code` | Every HTTP request served. The route is the pattern, such as `/api/sessions/{id}`; files are `static`. |
+| `airspace.http.server.request.duration` | histogram | `http.route` | Time to serve each request. The event stream is left out. |
+| `airspace.recording.snapshots`, `.bytes` | counter | | Snapshots, and compressed bytes, written to the database |
+| `airspace.recording.failures` | counter | `reason` (`error`, `dropped`) | Recording writes that failed or were dropped |
+| `airspace.recording.sessions.pruned` | counter | | Sessions deleted by retention |
+| `airspace.recording.active`, `.healthy` | gauge | | 1 while recording, and 1 while storage works |
+| `airspace.recording.database.size` | gauge | | Database size, bytes |
 
 `OPENSKY_TOKEN_URL` and `OPENSKY_API_URL` also exist. They point Airspace at
 a fake OpenSky for development and tests. Do not set them in normal use.
@@ -321,6 +386,13 @@ make e2e         # browser tests (Playwright), in e2e/
 
 `.github/workflows/ci.yml` runs all four on every push and pull request.
 
+### Releases
+
+Publishing a GitHub release runs GoReleaser (`.github/workflows/release.yml`,
+`.goreleaser.yaml`). It builds the archives, the Linux packages and the
+container image, with the version from the tag. `make snapshot` builds the
+same artefacts locally, apart from the image, without publishing.
+
 All tests use a fake OpenSky that counts every request, token requests
 included. No test calls the real API.
 
@@ -367,6 +439,7 @@ imagery tiles from NASA GIBS.
   acknowledge the use of imagery provided by services from NASA's Global
   Imagery Browse Services (GIBS), part of NASA's Earth Science Data and
   Information System (ESDIS)."
+- Airspace itself is under the MIT licence; see `LICENSE`.
 - [CesiumJS](https://cesium.com/cesiumjs/) (Apache 2.0),
   [Datastar](https://data-star.dev) (MIT), and
   [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) (MIT) are embedded.

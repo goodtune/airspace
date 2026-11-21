@@ -123,6 +123,22 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
+func TestDotvault(t *testing.T) {
+	none := map[string]string{"OPENSKY_CLIENT_ID": "", "OPENSKY_CLIENT_SECRET": ""}
+	c, err := Load([]string{"-dotvault", "opensky"}, env(none))
+	if err != nil || c.Dotvault != "opensky" || c.ClientID != "" {
+		t.Fatalf("flag: %+v %v", c, err)
+	}
+	none["OPENSKY_DOTVAULT"] = "opensky"
+	if c, err = Load(nil, env(none)); err != nil || c.Dotvault != "opensky" {
+		t.Fatalf("env: %v", err)
+	}
+	// Both ways at once is ambiguous.
+	if _, err := Load(nil, env(map[string]string{"OPENSKY_DOTVAULT": "opensky"})); err == nil || !strings.Contains(err.Error(), "choose one") {
+		t.Errorf("both set: %v", err)
+	}
+}
+
 func TestACME(t *testing.T) {
 	c, err := Load(nil, env(nil))
 	if err != nil || len(c.ACMEDomains) != 0 || c.ListenAddr != ":8080" {

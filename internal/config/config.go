@@ -27,22 +27,26 @@ const (
 
 // Config holds every operator setting.
 type Config struct {
-	ClientID      string
-	ClientSecret  string
-	ListenAddr    string
-	PollInterval  time.Duration
-	MinAuto       bool          // MIN_INTERVAL=auto
-	MinInterval   time.Duration // fixed floor when MinAuto is false
-	MaxInterval   time.Duration // 0 means unset
-	DailyCredits  int
-	DailyUseHours float64
-	CreditReserve int
-	HiddenTimeout time.Duration
-	IdleTimeout   time.Duration // 0 disables
-	DBPath        string
-	MaxDBSize     int64      // bytes, 0 means unset
-	RetentionDays int        // 0 means unset
-	StartView     [3]float64 // longitude, latitude, height in metres
+	ClientID     string
+	ClientSecret string
+	// Dotvault names a dotvault secret to read the two credentials from,
+	// in place of the environment. The caller loads them.
+	Dotvault       string
+	DotvaultConfig string // dotvault's own config file; empty for its default
+	ListenAddr     string
+	PollInterval   time.Duration
+	MinAuto        bool          // MIN_INTERVAL=auto
+	MinInterval    time.Duration // fixed floor when MinAuto is false
+	MaxInterval    time.Duration // 0 means unset
+	DailyCredits   int
+	DailyUseHours  float64
+	CreditReserve  int
+	HiddenTimeout  time.Duration
+	IdleTimeout    time.Duration // 0 disables
+	DBPath         string
+	MaxDBSize      int64      // bytes, 0 means unset
+	RetentionDays  int        // 0 means unset
+	StartView      [3]float64 // longitude, latitude, height in metres
 
 	// Upstream endpoints. Overridden only to point at a fake for testing.
 	TokenURL string
@@ -76,6 +80,8 @@ type setting struct {
 var settings = []setting{
 	{"OPENSKY_CLIENT_ID", "opensky-client-id", "", "OAuth2 client id (required)"},
 	{"OPENSKY_CLIENT_SECRET", "opensky-client-secret", "", "OAuth2 client secret (required)"},
+	{"OPENSKY_DOTVAULT", "dotvault", "", "read the client id and secret from this dotvault secret instead, for example opensky"},
+	{"DOTVAULT_CONFIG", "dotvault-config", "", "dotvault's configuration file, when it is not in the usual place"},
 	{"LISTEN_ADDR", "listen-addr", ":8080", "HTTP listen address"},
 	{"POLL_INTERVAL", "poll-interval", "10s", "startup default for the shared interval"},
 	{"MIN_INTERVAL", "min-interval", "auto", "shortest interval a client may set: auto or a duration"},
@@ -135,8 +141,13 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 		Resolution:   Resolution,
 		SessionGrace: 2 * time.Minute,
 	}
-	if c.ClientID == "" || c.ClientSecret == "" {
-		return nil, errors.New("OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET are required: create an API client on your OpenSky account page")
+	c.Dotvault = get("OPENSKY_DOTVAULT")
+	c.DotvaultConfig = get("DOTVAULT_CONFIG")
+	switch {
+	case c.Dotvault != "" && (c.ClientID != "" || c.ClientSecret != ""):
+		return nil, errors.New("OPENSKY_DOTVAULT is set together with OPENSKY_CLIENT_ID or OPENSKY_CLIENT_SECRET: choose one way to supply the credentials")
+	case c.Dotvault == "" && (c.ClientID == "" || c.ClientSecret == ""):
+		return nil, errors.New("OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET are required (or OPENSKY_DOTVAULT to read them from dotvault): create an API client on your OpenSky account page")
 	}
 
 	var err error

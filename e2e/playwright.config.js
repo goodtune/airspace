@@ -8,6 +8,11 @@ const gpuArgs = process.platform === 'darwin'
   ? ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist']
   : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 
+// Software rendering is slow, so CI draws a smaller page. The shape is the
+// same, which keeps what the camera sees, and so the query costs, unchanged.
+const small = process.platform !== 'darwin' || !!process.env.AIRSPACE_E2E_SMALL;
+const viewport = small ? { width: 960, height: 600 } : { width: 1280, height: 800 };
+
 export default defineConfig({
   testDir: './tests',
   workers: 1, // each test drives WebGL pages; one at a time keeps timing honest
@@ -16,7 +21,7 @@ export default defineConfig({
   reporter: [['list']],
   outputDir: '.tmp/results',
   use: {
-    viewport: { width: 1280, height: 800 },
+    viewport,
     launchOptions: { args: gpuArgs },
   },
 });

@@ -44,13 +44,20 @@ test.describe('live view', () => {
       for (const [id, it] of window.airspace.layer.items) out[id] = [it.bb.position.x, it.bb.position.y, it.bb.position.z];
       return out;
     });
+    // Hold off the next snapshot, so any movement seen is dead reckoning.
+    await page.evaluate(() => window.act('interval', { seconds: 120 }));
+    await expect.poll(async () => (await stack.status()).interval.seconds).toBe(120);
+    await sleep(500);
     const before = await positions();
     const version = (await debug(page)).version;
-    await sleep(1500);
-    const after = await positions();
+    const movedCount = async () => {
+      const after = await positions();
+      return Object.keys(before).filter((id) => after[id] && Math.hypot(...before[id].map((v, i) => v - after[id][i])) > 50).length;
+    };
+    // Aircraft move every frame. A slow renderer draws few frames, so wait
+    // for the movement, not for a fixed time.
+    await expect.poll(movedCount, { timeout: 30000 }).toBeGreaterThan(Object.keys(before).length / 3);
     expect((await debug(page)).version).toBe(version); // no new snapshot in between
-    const moved = Object.keys(before).filter((id) => after[id] && Math.hypot(...before[id].map((v, i) => v - after[id][i])) > 50);
-    expect(moved.length).toBeGreaterThan(Object.keys(before).length / 3);
   });
 
   test('draws NASA GIBS imagery', async ({ stack, page }) => {

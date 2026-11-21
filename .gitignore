@@ -9,3 +9,4 @@ playwright-report/
 /dev.db*
 /e2e/.tmp/
 /dist/
+/site/

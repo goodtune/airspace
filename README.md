@@ -7,20 +7,21 @@ It records what it shows, replays it later, and exports replays as video.
 https://github.com/user-attachments/assets/e3d32eb3-17f0-4226-adcb-a0c803bfa717
 
 *Twelve minutes of recorded world traffic, replayed at 60× and exported by
-Airspace itself. The clip is also in the repository as
-[`docs/demo.webm`](docs/demo.webm). Make it again with `make demo`.*
+Airspace itself.*
 
 It is one Go binary for personal use on a private network. Aircraft data
 comes from the [OpenSky Network](https://opensky-network.org). Imagery is
-NASA Blue Marble from [GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api).
+NASA Blue Marble from
+[GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api).
 
 ## Quick start
 
-1. Create an OpenSky API client (see below).
-2. Build: `make build`. The binaries are `bin/airspace-linux-amd64` and
-   `bin/airspace-linux-arm64`. `make local` builds `bin/airspace` for the
-   machine you are on.
-3. Run:
+1. Create an API client on your [OpenSky](https://opensky-network.org)
+   account page.
+2. Download a binary from the
+   [releases page](https://github.com/goodtune/airspace/releases), or build
+   one with `make local`.
+3. Run it:
 
    ```sh
    OPENSKY_CLIENT_ID=... OPENSKY_CLIENT_SECRET=... ./bin/airspace
@@ -28,420 +29,37 @@ NASA Blue Marble from [GIBS](https://www.earthdata.nasa.gov/engage/open-data-ser
 
 4. Open `http://<host>:8080`.
 
-Each [release](https://github.com/goodtune/airspace/releases) has archives
-for Linux, macOS and Windows, `rpm`, `deb` and `apk` packages, and a container
-image at `ghcr.io/goodtune/airspace`. The packages install a systemd unit
-(disabled until you enable it) and `/etc/airspace/airspace.env` for the
-settings. `Dockerfile` builds an image from source.
+[Getting started](docs/getting-started.md) has the detail, including reading
+the credentials from dotvault.
 
-## Create an OpenSky API client
+## What it does
 
-1. Register a free account at <https://opensky-network.org> and sign in.
-2. Open your **Account** page and find the **API Client** section.
-3. Create a client. OpenSky gives you a `client_id` and a `client_secret`.
-4. Give them to Airspace as `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET`.
+- **One shared session.** Five browsers cost the same OpenSky credits as one.
+- **Nobody watching, nothing requested.** With no active browser it makes no
+  request to OpenSky at all.
+- **Viewport first.** Each poll asks only for the area being looked at, and
+  the interval is held to what the daily credit allowance can afford.
+- **Recording, replay, export.** Sessions are recorded to SQLite, replayed at
+  no credit cost, and exported to MP4 in the browser.
 
-The secret stays on the server. Airspace never sends it, or the access token,
-to a browser, and never writes either to the log.
+## Documentation
 
-### Credentials from dotvault
-
-If you keep secrets in [dotvault](https://github.com/goodtune/dotvault),
-Airspace can read the two values from there. Store a secret with the fields
-`clientId` and `clientSecret`, then name it:
-
-```sh
-./bin/airspace --dotvault opensky      # or OPENSKY_DOTVAULT=opensky
-```
-
-- Do not also set `OPENSKY_CLIENT_ID` or `OPENSKY_CLIENT_SECRET`; Airspace
-  refuses to start with both, so there is no doubt which is in use.
-- Airspace uses the login dotvault already has for the user it runs as. It
-  never opens a browser or prompts. If there is no usable login, it says so
-  and stops: run `dotvault login` first.
-- It reads dotvault's system configuration file, or
-  `~/.config/dotvault/config.yaml` when there is no system file. Set
-  `DOTVAULT_CONFIG` (or `--dotvault-config`) for any other location.
-- The credentials are read once, at startup. Restart Airspace after you
-  change them. This talks to Vault, not to OpenSky, so it does not break the
-  rule that startup makes no OpenSky request.
-
-## How it uses OpenSky
-
-- One poller, shared by every browser. Five browsers cost the same as one.
-- **Nobody watching, nothing requested.** With no active browser, Airspace
-  makes no request to OpenSky at all: no poll, no token request, no
-  keep-alive. It makes no request at startup.
-- **Viewport first.** Each poll asks only for the area being looked at. A
-  whole-world query is an explicit, temporary choice ("Global" coverage).
-- A browser is *active* when its connection is open and its tab was visible
-  within `HIDDEN_TIMEOUT`. A browser in replay is not active.
-- After `IDLE_TIMEOUT` with no input from anyone, polling pauses until
-  someone clicks.
-
-## Configuration
-
-Settings are environment variables. Each also has a flag that overrides it:
-lower-case the name and change `_` to `-`, for example `-poll-interval 15s`.
-Run `airspace -h` for the list. Nothing here can be changed from the UI.
-
-| Setting | Default | Meaning |
-|---|---|---|
-| `OPENSKY_CLIENT_ID` | required | OAuth2 client id |
-| `OPENSKY_CLIENT_SECRET` | required | OAuth2 client secret |
-| `OPENSKY_DOTVAULT` | unset | Read the id and secret from this dotvault secret instead. Flag: `--dotvault`. |
-| `LISTEN_ADDR` | `:8080` | HTTP listen address |
-| `POLL_INTERVAL` | `10s` | The shared refresh interval at startup |
-| `MIN_INTERVAL` | `auto` | Shortest interval a browser may set: `auto`, or a duration of 5 s or more |
-| `MAX_INTERVAL` | unset | Longest interval a browser may set |
-| `DAILY_CREDITS` | `4000` | Your daily allowance, used by `auto` and by the forecast |
-| `DAILY_USE_HOURS` | `2` | Hours of use you expect in a day, used by `auto` |
-| `CREDIT_RESERVE` | `200` | Balance the guard tries not to go below |
-| `HIDDEN_TIMEOUT` | `60s` | A hidden tab stops counting as active after this |
-| `IDLE_TIMEOUT` | `30m` | Pause after this long with no input; `0` disables |
-| `DB_PATH` | `./airspace.db` | SQLite database file |
-| `MAX_DB_SIZE` | unset | Delete the oldest sessions above this size, for example `2GB` |
-| `RETENTION_DAYS` | unset | Delete sessions older than this many days |
-| `START_VIEW` | `151.2,-33.9,450000` | Opening camera as longitude, latitude, height in metres. Used until a shared camera has been saved. |
-
-Durations are Go durations (`10s`, `2m`) or a bare number of seconds.
-
-Airspace refuses to start, with a message, when:
-
-- a credential is missing
-- a fixed `MIN_INTERVAL` is below 5 s, the resolution of OpenSky data
-- `MIN_INTERVAL` is greater than `MAX_INTERVAL`
-- `DAILY_USE_HOURS` is outside 0 to 24
-
-These checks are local. If `POLL_INTERVAL` is outside the bounds, Airspace
-clamps it and logs that it did.
-
-### HTTPS
-
-Airspace can get its own certificate from an ACME server and serve HTTPS.
-Set `ACME_DOMAINS` to turn it on. It is off by default.
-
-| Setting | Default | Meaning |
-|---|---|---|
-| `ACME_DOMAINS` | unset | Hostnames to get certificates for, comma separated. Setting it turns TLS on. |
-| `ACME_DIRECTORY_URL` | Let's Encrypt | The ACME directory |
-| `ACME_EMAIL` | unset | Contact address for the ACME account |
-| `ACME_CA_FILE` | unset | PEM root to trust when the ACME server itself has a private certificate |
-| `ACME_EAB_KID`, `ACME_EAB_HMAC_KEY` | unset | External account binding, if the server requires it |
-| `ACME_CACHE_DIR` | `acme/` beside the database | Where the account key and certificates are kept. Keep it private. |
-| `ACME_RENEW_BEFORE` | `auto` | Renew this long before expiry. `auto` is a third of the certificate's life: 30 days for a 90 day certificate, 56 hours for a 7 day one. |
-| `TLS_LISTEN_ADDR` | `:443` | HTTPS listen address |
-
-With TLS on, `LISTEN_ADDR` defaults to `:80`. That listener answers only the
-ACME HTTP challenge and redirects everything else to HTTPS. If it cannot be
-opened, Airspace logs a warning and carries on with HTTPS alone.
-
-Airspace asks for the certificate when it starts and logs the result. It
-proves it holds the name with the TLS-ALPN-01 challenge, or HTTP-01. For
-either, **the ACME server must be able to connect to Airspace on port 443 or
-port 80**, at the address the hostname resolves to.
-
-- **Let's Encrypt** (the default): the hostname must resolve publicly and
-  port 443 or 80 must reach this machine from the internet. A host that is
-  only on a private network cannot get a Let's Encrypt certificate this way;
-  that needs the DNS-01 challenge, which Airspace does not do.
-- **A private ACME server**, for example HashiCorp Vault's PKI engine: point
-  `ACME_DIRECTORY_URL` at it. The server must resolve the hostname and reach
-  the machine. Browsers must trust that server's root certificate.
-
-  ```sh
-  ACME_DOMAINS=airspace.example.internal \
-  ACME_DIRECTORY_URL=https://vault.example.internal:8200/v1/pki/roles/lan/acme/directory \
-  ./bin/airspace
-  ```
-
-Wildcard names are not supported. On Linux, a service that is not root needs
-`CAP_NET_BIND_SERVICE` to open ports 80 and 443; the systemd unit in
-`packaging/systemd/` shows the lines.
-
-### Metrics
-
-Airspace emits OpenTelemetry metrics over OTLP. Export is off until you
-point it at a collector with the standard variables:
-
-```sh
-OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.example.org:4318 ./bin/airspace
-```
-
-It honours the usual `OTEL_*` settings: `OTEL_EXPORTER_OTLP_PROTOCOL`
-(`http/protobuf` by default, or `grpc`), `OTEL_EXPORTER_OTLP_HEADERS`,
-`OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_SERVICE_NAME` (default `airspace`),
-`OTEL_RESOURCE_ATTRIBUTES`, and `OTEL_SDK_DISABLED`. Sending metrics is not
-an OpenSky request and does not depend on anyone watching.
-
-| Metric | Type | Attributes | Meaning |
-|---|---|---|---|
-| `airspace.build_info` | gauge | `version`, `revision`, `goversion` | Always 1. Identifies the running build. |
-| `airspace.opensky.requests` | counter | `endpoint` (`states`, `token`), `outcome` (`ok`, `rate_limited`, `unauthorized`, `error`), `http.response.status_code` | Every request made to OpenSky, token requests included |
-| `airspace.opensky.credits.remaining` | gauge | | The balance from `X-Rate-Limit-Remaining`, recorded with the request that returned it |
-| `airspace.opensky.credits.spent` | counter | | Credits spent, from the area of each successful query |
-| `airspace.opensky.request.duration` | histogram | `endpoint` | Time taken by each OpenSky request |
-| `airspace.polls` | counter | `outcome`, `coverage` (`viewport`, `global`) | Poll cycles. One poll can make several requests. |
-| `airspace.snapshot.aircraft` | gauge | | Aircraft in the latest snapshot |
-| `airspace.snapshot.age` | gauge | | Seconds since the last good snapshot |
-| `airspace.poll.interval` | gauge | | Effective poll interval, seconds |
-| `airspace.poll.cost` | gauge | | Credit cost of one poll at the current scope |
-| `airspace.poller.state` | gauge | `state` (`polling`, `paused`, `stopped`) | 1 for the current state, 0 for the others |
-| `airspace.clients.connected` | gauge | | Browsers holding the event stream |
-| `airspace.clients.active` | gauge | | Browsers counted as watching live |
-| `airspace.state.changes` | counter | `type` | Changes to shared state: camera, interval, selected, coverage, scope, and so on |
-| `airspace.http.server.requests` | counter | `http.route`, `http.request.method`, `http.response.status_code` | Every HTTP request served. The route is the pattern, such as `/api/sessions/{id}`; files are `static`. |
-| `airspace.http.server.request.duration` | histogram | `http.route` | Time to serve each request. The event stream is left out. |
-| `airspace.recording.snapshots`, `.bytes` | counter | | Snapshots, and compressed bytes, written to the database |
-| `airspace.recording.failures` | counter | `reason` (`error`, `dropped`) | Recording writes that failed or were dropped |
-| `airspace.recording.sessions.pruned` | counter | | Sessions deleted by retention |
-| `airspace.recording.active`, `.healthy` | gauge | | 1 while recording, and 1 while storage works |
-| `airspace.recording.database.size` | gauge | | Database size, bytes |
-
-`OPENSKY_TOKEN_URL` and `OPENSKY_API_URL` also exist. They point Airspace at
-a fake OpenSky for development and tests. Do not set them in normal use.
-
-## Credit arithmetic
-
-A free registered OpenSky account has 4,000 credits a day. The cost of one
-`/states/all` request depends on the area asked for:
-
-| Area | Cost |
+| | |
 |---|---|
-| 25 sq° or less | 1 credit |
-| 25 to 100 sq° | 2 credits |
-| 100 to 400 sq° | 3 credits |
-| more than 400 sq°, or the whole world | 4 credits |
+| [Getting started](docs/getting-started.md) | Create an OpenSky client and run Airspace |
+| [How it works](docs/how-it-works.md) | The shared session and the activity rules |
+| [Credits and query scope](docs/features/credits.md) | What each poll costs, and the limits that protect the allowance |
+| [Recording](docs/features/recording.md) | What is stored, and measured storage figures |
+| [Replay and video export](docs/features/replay.md) | Watching a session again, and exporting MP4 |
+| [Installation](docs/admin/installation.md) | Packages, container, systemd |
+| [Configuration](docs/admin/configuration.md) | Every setting |
+| [HTTPS](docs/admin/https.md) | Certificates from Let's Encrypt or a private ACME server |
+| [Monitoring](docs/admin/monitoring.md) | OpenTelemetry metrics |
+| [HTTP API](docs/api.md) | Endpoints |
+| [Development](docs/development.md) | Tests, tooling, releases |
+| [Attribution](docs/attribution.md) | Data, imagery and library credits |
 
-Credits used in an hour:
+## Licence
 
-| Interval | 1 credit | 2 credits | 3 credits | 4 credits |
-|---|---|---|---|---|
-| 5 s | 720 | 1,440 | 2,160 | 2,880 |
-| 10 s | 360 | 720 | 1,080 | 1,440 |
-| 60 s | 60 | 120 | 180 | 240 |
-
-The defaults assume two hours of use a day:
-
-- At the default 10 s, two hours costs at most 2,880 credits, even zoomed
-  all the way out.
-- At 5 s, two hours of a regional view costs 1,440 or 2,880 credits.
-- At 5 s, the two larger tiers would not last two hours. So `MIN_INTERVAL=auto`
-  raises the floor for them.
-
-The `auto` floor, in seconds, rounded up:
-
-    max(5, DAILY_USE_HOURS × 3600 × cost of the poll ÷ (DAILY_CREDITS − CREDIT_RESERVE))
-
-| Poll cost | Floor at 2 hours | Floor at 24 hours |
-|---|---|---|
-| 1 credit | 5 s | 23 s |
-| 2 credits | 5 s | 46 s |
-| 3 credits | 6 s | 69 s |
-| 4 credits | 8 s | 91 s |
-
-When the view crosses into a costlier tier, the floor rises, and the interval
-rises with it if it must. Zoom back in and the interval returns to what was
-asked for. The UI names the reason whenever the interval is not the one a
-browser chose: "operator minimum", "operator maximum", "credit reserve", or
-"rate limited".
-
-### Query scope
-
-- Airspace pads the viewed box by up to 20% a side, so aircraft near the edge
-  are there before they scroll in. Padding never moves a query into a
-  costlier tier.
-- A view that crosses the antimeridian becomes two boxes.
-- A browser that detaches from the shared camera adds its own box. Airspace
-  then picks the cheapest of: separate boxes, one box around them all, or one
-  global query.
-- One poll never costs more than 4 credits. A plan that would cost 4 or more
-  becomes a single global query.
-- A view must shrink 10% below a tier boundary before the plan drops a tier,
-  so a small wobble does not flip the cost back and forth.
-- Moving the camera never causes a request. The new scope applies at the next
-  scheduled poll.
-- The dashed outline on the globe shows what was queried. Outside it, an
-  empty sky means "not asked", not "no traffic".
-
-### Credit guard
-
-- Airspace reads the balance from `X-Rate-Limit-Remaining` on every response.
-- Below `CREDIT_RESERVE`, it stretches the interval in proportion: at half
-  the reserve the interval doubles, at a quarter it is four times as long.
-  The balance drains more and more slowly and does not reach zero. This may
-  take the interval above `MAX_INTERVAL`.
-- On HTTP 429 it waits for `X-Rate-Limit-Retry-After-Seconds`, then tries
-  again.
-- The panel shows credits left, burn rate, viewing time left at the current
-  rate, and the clock time that is. It warns under 30 minutes.
-
-### Refill time: not established
-
-The OpenSky documentation says only that credits refill "daily". It gives no
-time and no time zone. This build was made with the anonymous allowance and
-did not run across a refill, so the refill time was not observed either.
-
-Airspace therefore shows the forecast alone ("runs out at 14:22") and says in
-the panel that it does not know whether credits run out before the refill.
-If you observe the refill (the balance jumps back to 4,000), the time it
-happens can be added as a setting.
-
-## Recording
-
-Recording is on by default. A session starts when the first browser becomes
-active. It ends when no browser has been active for 2 minutes; the 2 minutes
-only stop a page reload from splitting a session. Polling still stops the
-moment the last browser leaves.
-
-A session stores exactly what was fetched, plus every change to shared state
-(camera, interval, selection, coverage, scope, clients, pauses). Recording
-never causes a request and never changes what is queried.
-
-So a normal session holds traffic **inside the viewed area only**. Replay can
-move the camera anywhere, but aircraft exist only where the session looked.
-To record the whole world, so the session can be re-shot from any angle,
-switch **Coverage** to **Global**. The UI shows the cost first. Global
-coverage turns itself off when the session ends.
-
-If the database cannot be opened or written, Airspace carries on live-only
-and shows a warning. Storage problems do not take the live view down.
-
-### Storage figures
-
-Measured on real OpenSky data, captured 21 November 2026. Each snapshot is
-one gzip-compressed row; it comes to about 37 bytes an aircraft.
-
-| View | Aircraft | Bytes per snapshot | Interval | Per hour |
-|---|---|---|---|---|
-| 25 sq° around Sydney | 48 | 2.1 kB | 5 s | 1.5 MB |
-| 25 sq° around Frankfurt | 158 | 6.3 kB | 5 s | 4.5 MB |
-| 100 sq° of western Europe | 573 | 20.8 kB | 5 s | 15 MB |
-| 400 sq° of Europe | 1,381 | 49 kB | 6 s | 30 MB |
-| Whole world | 12,444 | 459 kB | 8 s | 207 MB |
-
-Two hours a day of a busy regional view is about 10 MB a day. Two hours of
-global coverage is about 400 MB. Set `MAX_DB_SIZE` or `RETENTION_DAYS` to
-have the oldest sessions deleted automatically.
-
-## Replay and video export
-
-Open **Sessions**, then **Replay**. Replay reads only the database. It costs
-no credits, and a browser in replay does not keep the live poller running.
-Replay is local to your browser; others stay on the live session.
-
-- Play, pause, scrub, speeds from 1× to 120×, and jump to the previous or
-  next recorded event.
-- Aircraft are interpolated along a great circle between the two snapshots
-  either side of the playhead. Aircraft in only one of the two fade in or
-  out.
-- Camera: **As recorded** follows the recorded camera, **Free** lets you fly,
-  **Follow aircraft** tracks the aircraft you clicked, **Keyframes** moves
-  between cameras you placed with **Add keyframe**.
-- For a viewport session, a keyframe that looks outside the recorded area is
-  marked red and warned about.
-
-**Export video** renders the replay to MP4 in the browser, frame by frame. It
-waits for imagery on every frame, so the result is the same on a slow machine
-as on a fast one. Options: time range, speed, resolution up to 4K, frame
-rate, camera, scope outline, and burned-in clock and attribution.
-
-Export needs WebCodecs (current Chrome, Edge, Safari). Without it the dialog
-says so; there is no lower-quality fallback. Chrome and Edge encode H.264.
-A browser with no H.264 encoder gets VP9 or AV1 in the MP4 instead, and the
-dialog says which.
-
-## HTTP API
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/states` | Latest snapshot. Compact JSON, gzip, ETag. |
-| `GET /api/status` | Poller, credit, client, and storage status |
-| `GET /api/sessions` | Recorded sessions |
-| `GET /api/sessions/{id}` | One session and the times of its snapshots |
-| `PATCH /api/sessions/{id}` | Rename: `{"name": "..."}` |
-| `DELETE /api/sessions/{id}` | Delete |
-| `GET /api/sessions/{id}/snapshots?from=&to=&limit=` | A page of snapshots. Times are Unix milliseconds. When `more` is true, ask again with `from=next`. |
-| `GET /api/sessions/{id}/events?from=&to=&after=&limit=&types=&exclude=` | A page of the event track |
-| `GET /healthz` | Liveness |
-| `GET /api/stream` | The Datastar event stream each browser holds |
-| `POST /api/action/{name}` | A change to shared state from one browser |
-
-None of these causes a request to OpenSky. `/api/states`, `/api/status`, and
-`/healthz` do not count as someone watching.
-
-Each aircraft in a snapshot is an array. The `fields` entry names the
-positions: icao24, callsign, country, lon, lat, baro, geo, onGround,
-velocity, track, vrate, squawk, timePos, lastContact. Aircraft with no
-position are left out.
-
-## Development
-
-```sh
-make test        # Go tests, with the race detector
-node --test web/test/geo.test.js    # motion and interpolation maths
-make acme-test   # a real certificate exchange against Pebble, a test ACME server
-make e2e         # browser tests (Playwright), in e2e/
-```
-
-`.github/workflows/ci.yml` runs all four on every push and pull request.
-
-### Releases
-
-Publishing a GitHub release runs GoReleaser (`.github/workflows/release.yml`,
-`.goreleaser.yaml`). It builds the archives, the Linux packages and the
-container image, with the version from the tag. `make snapshot` builds the
-same artefacts locally, apart from the image, without publishing.
-
-All tests use a fake OpenSky that counts every request, token requests
-included. No test calls the real API.
-
-To work on the frontend without spending credits:
-
-```sh
-make dev-fake    # terminal 1: a fake OpenSky replaying captured world traffic
-make dev         # terminal 2: Airspace against it, on :8080
-make seed        # optional: load the capture into dev.db as a session to replay
-```
-
-`testdata/capture/` holds 87 whole-world snapshots at 10 s spacing (14.5
-minutes), stored with Git LFS. `cmd/capture` records more; it stops before
-the balance runs out.
-
-Frontend libraries (CesiumJS, Datastar, mp4-muxer) are fetched at pinned
-versions by `scripts/vendor.sh` and embedded in the binary. Nothing loads
-from a CDN at run time. The only thing a browser fetches from the internet is
-imagery tiles from NASA GIBS.
-
-## Design notes
-
-- **Hidden tabs.** By default the Datastar client closes its stream when a
-  tab is hidden and reopens it when the tab shows again. Airspace opens the
-  stream with Datastar's `openWhenHidden` option, so the connection stays up
-  and the page reports its visibility. That lets the server apply
-  `HIDDEN_TIMEOUT` exactly, and a brief tab switch does not look like a
-  disconnect.
-- **Aircraft data does not travel over Datastar.** Signals carry control
-  state. When the snapshot version changes, each browser fetches
-  `/api/states`.
-- **No authentication.** Airspace assumes a trusted network. HTTPS encrypts
-  the connection; it does not restrict who may connect.
-
-## Attribution
-
-- Aircraft data: [The OpenSky Network](https://opensky-network.org). OpenSky
-  asks that work using its data cites: Matthias Schäfer, Martin Strohmeier,
-  Vincent Lenders, Ivan Martinovic and Matthias Wilhelm, "Bringing Up OpenSky:
-  A Large-scale ADS-B Sensor Network for Research", IPSN 2014. The free API
-  is for non-commercial use.
-- Imagery: NASA Global Imagery Browse Services (GIBS), layer
-  `BlueMarble_ShadedRelief_Bathymetry`. NASA asks for the credit: "We
-  acknowledge the use of imagery provided by services from NASA's Global
-  Imagery Browse Services (GIBS), part of NASA's Earth Science Data and
-  Information System (ESDIS)."
-- Airspace itself is under the MIT licence; see `LICENSE`.
-- [CesiumJS](https://cesium.com/cesiumjs/) (Apache 2.0),
-  [Datastar](https://data-star.dev) (MIT), and
-  [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) (MIT) are embedded.
-
-Both credits are shown in the UI and can be burned into exported video.
+MIT. See [LICENSE](LICENSE). Aircraft data is from The OpenSky Network and
+imagery is from NASA GIBS; see [Attribution](docs/attribution.md).

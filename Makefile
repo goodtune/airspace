@@ -48,7 +48,7 @@ e2e: local
 demo: local
 	go build -o bin/devtool ./cmd/devtool
 	cd e2e && node demo.mjs .tmp/demo.mp4
-	ffmpeg -v error -y -i e2e/.tmp/demo.mp4 -c:v libvpx-vp9 -b:v 0 -crf 46 -row-mt 1 -an docs/demo.webm
+	ffmpeg -v error -y -i e2e/.tmp/demo.mp4 -c:v libvpx-vp9 -b:v 0 -crf 46 -row-mt 1 -an docs/assets/demo.webm
 
 # Run a fake OpenSky that replays the captured global traffic.
 dev-fake:

@@ -232,6 +232,7 @@ class Exporter {
         viewer.render();
         const waitStart = performance.now();
         while (!viewer.scene.globe.tilesLoaded || !layer.ready()) {
+          if (this.cancelled) break;
           if (performance.now() - waitStart > 20000) {
             slowTiles++;
             break;
@@ -239,6 +240,7 @@ class Exporter {
           await sleep(15);
           viewer.render();
         }
+        if (this.cancelled) break;
         viewer.render();
 
         let source = viewer.canvas;
@@ -258,15 +260,19 @@ class Exporter {
         frame.close();
         frames++;
         // Do not let frames pile up waiting for the encoder.
-        while (encoder.encodeQueueSize > 6) await sleep(5);
+        while (encoder.encodeQueueSize > 6 && !this.cancelled) await sleep(5);
         if (i % 3 === 0) {
           progress(i + 1, total, `Frame ${i + 1} of ${total}`);
           await sleep(0); // let the page paint and take a cancel click
         }
       }
       if (encodeError) throw encodeError;
-      await encoder.flush();
-      muxer.finalize();
+      // A cancelled export is thrown away, so there is no reason to wait for
+      // the frames still queued in the encoder. Closing it drops them.
+      if (!this.cancelled) {
+        await encoder.flush();
+        muxer.finalize();
+      }
     } finally {
       if (encoder.state !== 'closed') encoder.close();
       document.body.classList.remove('exporting');

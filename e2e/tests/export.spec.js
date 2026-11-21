@@ -126,6 +126,7 @@ test.describe('video export', () => {
     await setup(stack, page, 'imagery=off');
     await page.locator('#rp-export').click();
     await page.locator('#ex-speed').selectOption('1');
+    await page.locator('#ex-size').selectOption('720p');
     await page.locator('#ex-to').fill('600');
     await expect(page.locator('#ex-msg')).toContainText('frames');
     await page.locator('#ex-start').click();

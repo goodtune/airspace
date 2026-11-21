@@ -1,0 +1,45 @@
+[Unit]
+Description=Airspace: live aircraft on a shared 3D globe
+Documentation=https://github.com/goodtune/airspace
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Settings, including the OpenSky credentials, live in this file. It is
+# readable by root only; systemd reads it before dropping privileges.
+EnvironmentFile=/etc/airspace/airspace.env
+ExecStart=/usr/bin/airspace
+
+DynamicUser=yes
+StateDirectory=airspace
+# The database and the ACME certificate cache go in /var/lib/airspace.
+Environment=DB_PATH=%S/airspace/airspace.db
+WorkingDirectory=%S/airspace
+
+# For HTTPS (ACME_DOMAINS in the env file), the service must be able to open
+# ports 80 and 443. Uncomment these two lines.
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+#CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

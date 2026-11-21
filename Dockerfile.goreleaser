@@ -1,0 +1,9 @@
+FROM gcr.io/distroless/static-debian12
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/airspace /airspace
+# The database, and the ACME certificate cache when TLS is on, go in /data.
+# Mount a volume there to keep recordings across container restarts.
+ENV DB_PATH=/data/airspace.db
+VOLUME /data
+EXPOSE 8080
+ENTRYPOINT ["/airspace"]

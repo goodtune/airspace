@@ -1,0 +1,12 @@
+/bin/
+/airspace
+/airspace.db*
+/web/static/vendor/
+node_modules/
+test-results/
+playwright-report/
+.env
+/dev.db*
+/e2e/.tmp/
+/dist/
+/site/

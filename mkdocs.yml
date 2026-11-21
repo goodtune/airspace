@@ -1,0 +1,30 @@
+site_name: Airspace
+site_description: Live aircraft on a shared 3D globe, with recording, replay and video export
+site_url: https://goodtune.github.io/airspace/
+repo_url: https://github.com/goodtune/airspace
+repo_name: goodtune/airspace
+
+theme:
+  name: shadcn
+
+markdown_extensions:
+  - admonition
+  - tables
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - How It Works: how-it-works.md
+  - Features:
+    - Credits and Query Scope: features/credits.md
+    - Recording: features/recording.md
+    - Replay and Video Export: features/replay.md
+    - Finding Bad Data: features/anomalies.md
+  - Administration:
+    - Installation: admin/installation.md
+    - Configuration: admin/configuration.md
+    - HTTPS: admin/https.md
+    - Monitoring: admin/monitoring.md
+  - HTTP API: api.md
+  - Development: development.md
+  - Attribution: attribution.md

@@ -1,0 +1,8 @@
+.git
+bin
+e2e
+testdata
+web/static/vendor
+*.db
+*.db-*
+dist

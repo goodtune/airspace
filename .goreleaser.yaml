@@ -1,0 +1,82 @@
+version: 2
+
+before:
+  hooks:
+    # Fetch the pinned frontend libraries (CesiumJS, Datastar, mp4-muxer) so
+    # they are embedded in the binary.
+    - ./scripts/vendor.sh
+
+builds:
+  - main: ./cmd/airspace
+    binary: airspace
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - darwin_amd64
+      - darwin_arm64
+      - windows_amd64
+      - windows_arm64
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+
+nfpms:
+  - id: airspace
+    package_name: airspace
+    vendor: goodtune
+    homepage: https://github.com/goodtune/airspace
+    maintainer: Gary Reynolds <gary@touch.au>
+    description: Live aircraft on a shared 3D globe, with recording, replay and video export
+    license: MIT
+    formats:
+      - rpm
+      - deb
+      - apk
+    bindir: /usr/bin
+    contents:
+      - src: packaging/systemd/airspace.service
+        dst: /usr/lib/systemd/system/airspace.service
+        type: config
+      # Holds the OpenSky client secret, so root only.
+      - src: packaging/airspace.env
+        dst: /etc/airspace/airspace.env
+        type: config|noreplace
+        file_info:
+          mode: 0600
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+dockers_v2:
+  - images:
+      - "ghcr.io/goodtune/airspace"
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.goreleaser

@@ -17,11 +17,11 @@ jobs:
     name: Go and JavaScript tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Check formatting
@@ -37,8 +37,8 @@ jobs:
     name: Certificate exchange (Pebble)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       # Starts Pebble, Let's Encrypt's test ACME server, and has Airspace get
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The captured traffic is in Git LFS. Cache it, so each run does not
       # download 41 MB against the LFS bandwidth allowance.
       - name: List LFS objects
@@ -60,10 +60,10 @@ jobs:
           path: .git/lfs
           key: lfs-${{ hashFiles('.lfs-objects') }}
       - run: git lfs pull
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -74,7 +74,7 @@ jobs:
         working-directory: e2e
         run: npm ci && npx playwright install --with-deps chromium
       - run: make e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: e2e-results

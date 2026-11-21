@@ -8,3 +8,4 @@ playwright-report/
 .env
 /dev.db*
 /e2e/.tmp/
+/dist/

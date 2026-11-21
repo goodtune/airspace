@@ -5,3 +5,4 @@ testdata
 web/static/vendor
 *.db
 *.db-*
+dist

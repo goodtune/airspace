@@ -143,10 +143,14 @@ test.describe('shared session', () => {
     await expect(b.locator('#interval')).toHaveValue('17', { timeout: 1000 });
 
     await moveCamera(a, 12, 47, 250000);
+    // The new camera reaches the other browser within a second...
+    await expect.poll(() => b.evaluate(() => window.airspace.state.camera.lon), { timeout: 1000 }).toBeCloseTo(12, 2);
+    // ...and its globe eases there. How long the ease takes to draw depends
+    // on the machine: a CI runner renders WebGL in software.
     await expect.poll(async () => {
       const c = (await debug(b)).camera;
       return Math.abs(c.lon - 12) < 0.01 && Math.abs(c.lat - 47) < 0.01;
-    }, { timeout: 2000 }).toBe(true);
+    }, { timeout: 20000 }).toBe(true);
 
     await a.evaluate(() => window.act('select', { icao24: 'a00010' }));
     await expect.poll(() => b.evaluate(() => window.airspace.layer.selected), { timeout: 1000 }).toBe('a00010');
@@ -161,7 +165,10 @@ test.describe('shared session', () => {
       await moveCamera(a, 10 + i, 48, 250000);
       await sleep(250);
     }
-    await sleep(1500); // time for any echo to bounce around
+    // Wait for B to finish easing to A's last position, however slowly this
+    // machine draws, then leave time for any echo to bounce around.
+    await expect.poll(async () => Math.abs((await debug(b)).camera.lon - 14) < 0.01, { timeout: 20000 }).toBe(true);
+    await sleep(1500);
     const da = await debug(a), db = await debug(b);
     // B applied A's moves and sent none of its own.
     expect(db.cameraApplied).toBeGreaterThan(0);

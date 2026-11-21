@@ -226,8 +226,11 @@ test.describe('recording and replay', () => {
     const d0 = await camDistance();
     const posBefore = (await debug(page)).camera;
     await page.locator('#rp-speed').selectOption('30');
+    const t0 = (await replayDebug(page)).time;
     await page.locator('#rp-play').click();
-    await sleep(3000);
+    // Play until 90 s of the session has gone by. On a slow renderer that
+    // takes longer than the 3 s it takes at full frame rate.
+    await expect.poll(async () => (await replayDebug(page)).time - t0, { timeout: 60000 }).toBeGreaterThan(90_000);
     await page.locator('#rp-play').click();
     const posAfter = (await debug(page)).camera;
     // The camera travelled with the aircraft and kept its distance.

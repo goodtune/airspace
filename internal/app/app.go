@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -56,11 +57,29 @@ func New(cfg *config.Config, static fs.FS, log *slog.Logger) *App {
 
 // Run serves until ctx is done.
 func (a *App) Run(ctx context.Context) error {
-	ln, err := net.Listen("tcp", a.cfg.ListenAddr)
+	if len(a.cfg.ACMEDomains) == 0 {
+		ln, err := net.Listen("tcp", a.cfg.ListenAddr)
+		if err != nil {
+			return err
+		}
+		return a.Serve(ctx, ln)
+	}
+	m, err := newACMEManager(a.cfg)
 	if err != nil {
 		return err
 	}
-	return a.Serve(ctx, ln)
+	tlsLn, err := net.Listen("tcp", a.cfg.TLSListenAddr)
+	if err != nil {
+		return fmt.Errorf("TLS_LISTEN_ADDR: %w", err)
+	}
+	// The plain listener is a convenience. Without it there is no redirect
+	// and no HTTP challenge, but the TLS challenge on the HTTPS port works.
+	plainLn, err := net.Listen("tcp", a.cfg.ListenAddr)
+	if err != nil {
+		a.log.Warn("plain HTTP listener unavailable; no redirect to HTTPS and no HTTP-01 challenge", "addr", a.cfg.ListenAddr, "error", err)
+		plainLn = nil
+	}
+	return a.ServeTLS(ctx, tlsLn, plainLn, m)
 }
 
 // Serve serves on ln until ctx is done.

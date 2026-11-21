@@ -122,3 +122,41 @@ func TestParseSize(t *testing.T) {
 		}
 	}
 }
+
+func TestACME(t *testing.T) {
+	c, err := Load(nil, env(nil))
+	if err != nil || len(c.ACMEDomains) != 0 || c.ListenAddr != ":8080" {
+		t.Fatalf("TLS must be off by default: %+v %v", c, err)
+	}
+	c, err = Load(nil, env(map[string]string{"ACME_DOMAINS": "Air.Example.org, b.example.org", "DB_PATH": "/var/lib/airspace/a.db"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.ACMEDomains) != 2 || c.ACMEDomains[0] != "air.example.org" || c.ACMEDirectoryURL != LetsEncryptURL ||
+		c.TLSListenAddr != ":443" || c.ListenAddr != ":80" || c.ACMECacheDir != "/var/lib/airspace/acme" || c.ACMERenewBefore != 0 {
+		t.Errorf("ACME defaults: %+v", c)
+	}
+	// An explicit plain port is kept.
+	c, _ = Load([]string{"-listen-addr", ":8080"}, env(map[string]string{"ACME_DOMAINS": "a.example.org"}))
+	if c.ListenAddr != ":8080" {
+		t.Errorf("explicit LISTEN_ADDR was overridden: %s", c.ListenAddr)
+	}
+	c, err = Load(nil, env(map[string]string{"ACME_DOMAINS": "a.example.org", "ACME_EAB_KID": "kid", "ACME_EAB_HMAC_KEY": "c2VjcmV0LWtleQ", "ACME_RENEW_BEFORE": "48h"}))
+	if err != nil || string(c.ACMEEABKey) != "secret-key" || c.ACMERenewBefore != 48*time.Hour {
+		t.Errorf("EAB and renew: %+v %v", c, err)
+	}
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string
+	}{
+		"wildcard":  {map[string]string{"ACME_DOMAINS": "*.example.org"}, "wildcards are not supported"},
+		"http url":  {map[string]string{"ACME_DOMAINS": "a.example.org", "ACME_DIRECTORY_URL": "http://ca/dir"}, "https URL"},
+		"half EAB":  {map[string]string{"ACME_DOMAINS": "a.example.org", "ACME_EAB_KID": "kid"}, "set together"},
+		"bad EAB":   {map[string]string{"ACME_DOMAINS": "a.example.org", "ACME_EAB_KID": "kid", "ACME_EAB_HMAC_KEY": "!!!"}, "base64url"},
+		"bad renew": {map[string]string{"ACME_DOMAINS": "a.example.org", "ACME_RENEW_BEFORE": "soon"}, "ACME_RENEW_BEFORE"},
+	} {
+		if _, err := Load(nil, env(tc.env)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want error containing %q", name, err, tc.want)
+		}
+	}
+}

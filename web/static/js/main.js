@@ -222,3 +222,13 @@ react();
 const [{ initReplay }, { initSessions }] = await Promise.all([import('./replay.js'), import('./sessions.js')]);
 initReplay(app);
 initSessions(app);
+
+// ?replay=latest, or ?replay=<session id>, opens straight into replay.
+if (params.has('replay')) {
+  let id = params.get('replay');
+  if (id === 'latest' || id === '') {
+    const { sessions } = await (await fetch('/api/sessions')).json();
+    id = sessions.find((s) => s.end !== 0)?.id ?? sessions[0]?.id;
+  }
+  if (id) app.replay.open(id);
+}

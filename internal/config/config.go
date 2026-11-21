@@ -3,11 +3,13 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ const Resolution = 5 * time.Second
 const (
 	DefaultTokenURL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 	DefaultAPIURL   = "https://opensky-network.org/api"
+	LetsEncryptURL  = "https://acme-v02.api.letsencrypt.org/directory"
 )
 
 // Config holds every operator setting.
@@ -51,6 +54,17 @@ type Config struct {
 	// session ends.
 	SessionGrace time.Duration
 
+	// TLS with a certificate from an ACME server. Off when ACMEDomains is empty.
+	ACMEDomains      []string
+	ACMEDirectoryURL string
+	ACMEEmail        string
+	ACMECAFile       string // extra root to trust when talking to the ACME server
+	ACMEEABKID       string
+	ACMEEABKey       []byte // decoded HMAC key
+	ACMECacheDir     string
+	ACMERenewBefore  time.Duration
+	TLSListenAddr    string
+
 	// Notes holds messages about adjustments made while loading, for the log.
 	Notes []string
 }
@@ -75,6 +89,15 @@ var settings = []setting{
 	{"MAX_DB_SIZE", "max-db-size", "", "prune oldest sessions above this size, for example 2GB"},
 	{"RETENTION_DAYS", "retention-days", "", "prune sessions older than this many days"},
 	{"START_VIEW", "start-view", "151.2,-33.9,450000", "opening camera: longitude,latitude,height in metres"},
+	{"ACME_DOMAINS", "acme-domains", "", "hostnames to get certificates for, comma separated; setting it turns TLS on"},
+	{"ACME_DIRECTORY_URL", "acme-directory-url", LetsEncryptURL, "ACME directory"},
+	{"ACME_EMAIL", "acme-email", "", "contact address for the ACME account"},
+	{"ACME_CA_FILE", "acme-ca-file", "", "PEM root certificate to trust when talking to a private ACME server"},
+	{"ACME_EAB_KID", "acme-eab-kid", "", "external account binding key id, if the ACME server requires one"},
+	{"ACME_EAB_HMAC_KEY", "acme-eab-hmac-key", "", "external account binding HMAC key, base64url"},
+	{"ACME_CACHE_DIR", "acme-cache-dir", "", "where the ACME account key and certificates are kept; default is beside the database"},
+	{"ACME_RENEW_BEFORE", "acme-renew-before", "auto", "renew this long before expiry; auto is a third of the certificate's life"},
+	{"TLS_LISTEN_ADDR", "tls-listen-addr", ":443", "HTTPS listen address, used when ACME_DOMAINS is set"},
 	{"OPENSKY_TOKEN_URL", "opensky-token-url", DefaultTokenURL, "token endpoint (testing only)"},
 	{"OPENSKY_API_URL", "opensky-api-url", DefaultAPIURL, "API root (testing only)"},
 }
@@ -96,7 +119,7 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 			var b strings.Builder
 			fs.SetOutput(&b)
 			fs.PrintDefaults()
-			return nil, fmt.Errorf("%w\nusage: airspace [flags]\n%s", flag.ErrHelp, redact(b.String(), *vals["OPENSKY_CLIENT_SECRET"]))
+			return nil, fmt.Errorf("%w\nusage: airspace [flags]\n%s", flag.ErrHelp, redact(redact(b.String(), *vals["OPENSKY_CLIENT_SECRET"]), *vals["ACME_EAB_HMAC_KEY"]))
 		}
 		return nil, err
 	}
@@ -184,12 +207,68 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 		return nil, fmt.Errorf("MAX_INTERVAL: %s is below %s, the resolution of OpenSky data", c.MaxInterval, Resolution)
 	}
 
+	if err := c.loadACME(get, fs); err != nil {
+		return nil, err
+	}
+
 	// Clamp the startup interval against the bounds for the cheapest poll.
 	if clamped, _ := c.Clamp(c.PollInterval, 1); clamped != c.PollInterval {
 		c.Notes = append(c.Notes, fmt.Sprintf("POLL_INTERVAL %s is outside the bounds; clamped to %s", c.PollInterval, clamped))
 		c.PollInterval = clamped
 	}
 	return c, nil
+}
+
+// loadACME reads the TLS settings. It only checks them; it contacts nothing.
+func (c *Config) loadACME(get func(string) string, fs *flag.FlagSet) error {
+	for _, d := range strings.Split(get("ACME_DOMAINS"), ",") {
+		if d = strings.ToLower(strings.TrimSpace(d)); d != "" {
+			if strings.ContainsAny(d, "*/: ") {
+				return fmt.Errorf("ACME_DOMAINS: %q is not a plain hostname; wildcards are not supported", d)
+			}
+			c.ACMEDomains = append(c.ACMEDomains, d)
+		}
+	}
+	c.ACMEDirectoryURL = get("ACME_DIRECTORY_URL")
+	c.ACMEEmail = get("ACME_EMAIL")
+	c.ACMECAFile = get("ACME_CA_FILE")
+	c.ACMECacheDir = get("ACME_CACHE_DIR")
+	c.TLSListenAddr = get("TLS_LISTEN_ADDR")
+	c.ACMEEABKID = get("ACME_EAB_KID")
+	if len(c.ACMEDomains) == 0 {
+		return nil
+	}
+	if !strings.HasPrefix(c.ACMEDirectoryURL, "https://") {
+		return fmt.Errorf("ACME_DIRECTORY_URL: %q must be an https URL", c.ACMEDirectoryURL)
+	}
+	if key := get("ACME_EAB_HMAC_KEY"); key != "" || c.ACMEEABKID != "" {
+		if key == "" || c.ACMEEABKID == "" {
+			return errors.New("ACME_EAB_KID and ACME_EAB_HMAC_KEY must be set together")
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(key, "="))
+		if err != nil {
+			return errors.New("ACME_EAB_HMAC_KEY is not valid base64url")
+		}
+		c.ACMEEABKey = raw
+	}
+	if v := get("ACME_RENEW_BEFORE"); !strings.EqualFold(v, "auto") {
+		d, err := parseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("ACME_RENEW_BEFORE: %q is not auto or a valid duration", v)
+		}
+		c.ACMERenewBefore = d
+	}
+	if c.ACMECacheDir == "" {
+		c.ACMECacheDir = filepath.Join(filepath.Dir(c.DBPath), "acme")
+	}
+	// With TLS on, the plain listener only answers ACME's HTTP challenge and
+	// redirects, so it belongs on port 80 unless the operator chose a port.
+	set := false
+	fs.Visit(func(f *flag.Flag) { set = set || f.Name == "listen-addr" })
+	if !set && c.ListenAddr == ":8080" {
+		c.ListenAddr = ":80"
+	}
+	return nil
 }
 
 // Floor is the shortest interval allowed for a poll of the given cost.

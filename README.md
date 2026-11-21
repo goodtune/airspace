@@ -4,11 +4,11 @@ Airspace shows live aircraft on a 3D globe. Everyone connected sees the same
 session: the same camera, the same selected aircraft, the same refresh rate.
 It records what it shows, replays it later, and exports replays as video.
 
-[![Airspace demo: the globe zooming in over Europe, with aircraft in motion. Click to play.](docs/demo.jpg)](docs/demo.webm)
+https://github.com/user-attachments/assets/e3d32eb3-17f0-4226-adcb-a0c803bfa717
 
-*[Play the demo clip](docs/demo.webm) (WebM, 12 seconds): twelve minutes of
-recorded world traffic, replayed at 60× and exported by Airspace itself. Make
-it again with `make demo`.*
+*Twelve minutes of recorded world traffic, replayed at 60× and exported by
+Airspace itself. The clip is also in the repository as
+[`docs/demo.webm`](docs/demo.webm). Make it again with `make demo`.*
 
 It is one Go binary for personal use on a private network. Aircraft data
 comes from the [OpenSky Network](https://opensky-network.org). Imagery is

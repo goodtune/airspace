@@ -5,7 +5,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOFLAGS := -trimpath -ldflags "-s -w"
 CAPTURE := testdata/capture/global-2026-11-21.jsonl.gz
 
-.PHONY: build local vendor test e2e demo dev-fake dev seed clean
+.PHONY: build local vendor test acme-test e2e demo dev-fake dev seed clean
 
 build: vendor
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -o bin/airspace-linux-amd64 ./cmd/airspace
@@ -22,6 +22,15 @@ vendor:
 test:
 	go vet ./...
 	go test -race ./...
+
+# A real certificate exchange against Pebble, Let's Encrypt's test ACME
+# server. Pebble is a test tool only; it is not part of the binary.
+PEBBLE_VERSION := v2.10.3
+bin/pebble:
+	GOBIN=$(CURDIR)/bin go install github.com/letsencrypt/pebble/v2/cmd/pebble@$(PEBBLE_VERSION)
+
+acme-test: bin/pebble
+	PEBBLE=$(CURDIR)/bin/pebble go test -race -count=1 -tags acme -run ACME ./internal/app
 
 # Browser tests. They run the real binary against a fake OpenSky.
 e2e: local

@@ -41,9 +41,18 @@ func newACMEManager(cfg *config.Config) (*autocert.Manager, error) {
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}, Proxy: http.ProxyFromEnvironment},
 		}
 	}
+	// The HTTP challenge is checked against the request's Host header, which
+	// carries a port when the listener is not on port 80.
+	allowed := autocert.HostWhitelist(cfg.ACMEDomains...)
+	policy := func(ctx context.Context, host string) error {
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		return allowed(ctx, host)
+	}
 	m := &autocert.Manager{
 		Prompt:      autocert.AcceptTOS,
-		HostPolicy:  autocert.HostWhitelist(cfg.ACMEDomains...),
+		HostPolicy:  policy,
 		Cache:       autocert.DirCache(cfg.ACMECacheDir),
 		Email:       cfg.ACMEEmail,
 		Client:      client,

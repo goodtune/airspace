@@ -316,8 +316,11 @@ position are left out.
 ```sh
 make test        # Go tests, with the race detector
 node --test web/test/geo.test.js    # motion and interpolation maths
+make acme-test   # a real certificate exchange against Pebble, a test ACME server
 make e2e         # browser tests (Playwright), in e2e/
 ```
+
+`.github/workflows/ci.yml` runs all four on every push and pull request.
 
 All tests use a fake OpenSky that counts every request, token requests
 included. No test calls the real API.

@@ -261,6 +261,31 @@ test.describe('recording and replay', () => {
     await expect(page.locator('#rp-marks .kf')).toHaveCount(0);
   });
 
+  test('a link opens replay at a moment, following an aircraft', async ({ stack, page }) => {
+    stack.seed({ bbox: EUROPE, name: 'Europe capture' });
+    await stack.startApp();
+    // What `airspace anomalies` prints for the KLM83K glitch in the capture.
+    const { sessions } = await (await fetch(`${stack.url}/api/sessions`)).json();
+    const at = sessions[0].start + 700_000; // 25 s before the glitch
+    await page.goto(`${stack.url}/?imagery=off&replay=${sessions[0].id}&at=${at}&aircraft=486492`);
+    await page.waitForFunction(() => {
+      const r = window.airspace?.replay?.debug?.();
+      return r && r.active && r.cameraMode === 'follow' && !r.buffering;
+    }, null, { timeout: 30_000 });
+    const r = await replayDebug(page);
+    expect(r.time).toBe(at);
+    expect(r.selected).toBe('486492');
+    expect(r.playing).toBe(false);
+    await expect(page.locator('#aircraft')).toContainText('KLM83K');
+    // The camera sits over the aircraft, near Amsterdam.
+    const followed = await page.evaluate(() => window.airspace.layer.selectedPos);
+    expect(followed.lon).toBeGreaterThan(4.5);
+    expect(followed.lon).toBeLessThan(5.5);
+    // Playing through the glitch, the aircraft is drawn far to the east.
+    await page.evaluate(() => window.airspace.replay.seek(window.airspace.replay.time + 37_000));
+    await expect.poll(() => page.evaluate(() => window.airspace.layer.selectedPos?.lon ?? 0), { timeout: 20_000 }).toBeGreaterThan(14);
+  });
+
   test('sessions can be renamed and deleted', async ({ stack, page }) => {
     stack.seed({ bbox: EUROPE, name: 'Before' });
     await stack.startApp();

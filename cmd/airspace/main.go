@@ -23,6 +23,9 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "anomalies" {
+		os.Exit(runAnomalies(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	cfg, err := config.Load(os.Args[1:], os.Getenv)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {

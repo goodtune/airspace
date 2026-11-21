@@ -25,6 +25,9 @@ NASA Blue Marble from GIBS.
 - [Replay and video export](features/replay.md): watch a session again and
   export it as MP4.
 
+- [Finding bad data](features/anomalies.md): list the moments in a recording
+  that cannot be right, and watch them back.
+
 ## Administration
 
 - [Installation](admin/installation.md): packages, container, systemd.

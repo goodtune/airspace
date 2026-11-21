@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -148,6 +149,29 @@ func Open(path string, opt Options, log *slog.Logger) (*Store, error) {
 	return s, nil
 }
 
+// OpenReadOnly opens an existing database for reading only. It changes
+// nothing, so it is safe to use on a database a running server has open.
+// Only the read methods work on the result.
+func OpenReadOnly(path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	r, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, err
+	}
+	var v int
+	if err := r.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		r.Close()
+		return nil, fmt.Errorf("opening %s: %w", path, err)
+	}
+	if v < 1 || v > len(migrations) {
+		r.Close()
+		return nil, fmt.Errorf("%s has schema version %d, which this binary cannot read", path, v)
+	}
+	return &Store{r: r}, nil
+}
+
 func migrate(db *sql.DB) error {
 	var v int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
@@ -178,6 +202,9 @@ func migrate(db *sql.DB) error {
 
 // Close drains the write queue and closes the database.
 func (s *Store) Close() error {
+	if s.w == nil { // opened read-only
+		return s.r.Close()
+	}
 	close(s.queue)
 	<-s.done
 	s.r.Close()

@@ -51,6 +51,7 @@ the credentials from dotvault.
 | [Credits and query scope](docs/features/credits.md) | What each poll costs, and the limits that protect the allowance |
 | [Recording](docs/features/recording.md) | What is stored, and measured storage figures |
 | [Replay and video export](docs/features/replay.md) | Watching a session again, and exporting MP4 |
+| [Finding bad data](docs/features/anomalies.md) | A command that lists impossible jumps and other glitches, with links to watch them |
 | [Installation](docs/admin/installation.md) | Packages, container, systemd |
 | [Configuration](docs/admin/configuration.md) | Every setting |
 | [HTTPS](docs/admin/https.md) | Certificates from Let's Encrypt or a private ACME server |

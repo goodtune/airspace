@@ -92,8 +92,9 @@ func main() {
 				log.Printf("bad body: %v", err)
 				break
 			}
-			if head.Time == lastTime {
-				log.Printf("duplicate time %d, skipped", head.Time)
+			// OpenSky sometimes serves the same data again, or older data.
+			if head.Time <= lastTime {
+				log.Printf("data time %d is not after %d, skipped", head.Time, lastTime)
 				break
 			}
 			lastTime = head.Time

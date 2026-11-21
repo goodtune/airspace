@@ -230,5 +230,21 @@ if (params.has('replay')) {
     const { sessions } = await (await fetch('/api/sessions')).json();
     id = sessions.find((s) => s.end !== 0)?.id ?? sessions[0]?.id;
   }
-  if (id) app.replay.open(id);
+  if (id) {
+    await app.replay.open(id);
+    // &at=<unix ms> seeks there, and &aircraft=<icao24> selects that
+    // aircraft and follows it. `airspace anomalies` prints links like this.
+    if (app.replay.active) {
+      const at = Number(params.get('at'));
+      if (at > 0) app.replay.seek(at);
+      const aircraft = params.get('aircraft');
+      if (aircraft) {
+        app.replay.select(aircraft.toLowerCase());
+        if (await app.replay.prepare(app.replay.time)) {
+          app.replay.drawAt(app.replay.time, 'free'); // places the aircraft, so there is something to follow
+          app.replay.setCameraMode('follow');
+        }
+      }
+    }
+  }
 }

@@ -19,6 +19,7 @@ nav:
     - Credits and Query Scope: features/credits.md
     - Recording: features/recording.md
     - Replay and Video Export: features/replay.md
+    - Finding Bad Data: features/anomalies.md
   - Administration:
     - Installation: admin/installation.md
     - Configuration: admin/configuration.md
